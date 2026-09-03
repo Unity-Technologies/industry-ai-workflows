@@ -1,0 +1,48 @@
+{
+  "mcpServers": {
+    "asset_manager": {
+      "command": "${CLAUDE_PLUGIN_DATA}/venvs/AM/Scripts/python.exe",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/Asset_Manager_MCP/am_mcp_server.py"
+      ],
+      "env": {
+        "UNITY_VPC_FQDN": "${user_config.UNITY_VPC_FQDN}",
+        "UNITY_VPC_PATH_PREFIX": "${user_config.UNITY_VPC_PATH_PREFIX}",
+        "UNITY_VPC_OPENID_CONFIG_URL": "${user_config.UNITY_VPC_OPENID_CONFIG_URL}",
+        "UNITY_VPC_CLIENT_ID": "${user_config.UNITY_VPC_CLIENT_ID}",
+        "UNITY_VPC_ASSETS_PATH": "${user_config.UNITY_VPC_ASSETS_PATH}",
+        "UAP_MCP_ALLOWED_ROOTS": "${user_config.UAP_MCP_ALLOWED_ROOTS}"
+      }
+    },
+    "asset_transformer": {
+      "command": "${CLAUDE_PLUGIN_DATA}/venvs/AT/Scripts/python.exe",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/Asset_Transformer_MCP/at_mcp_server.py"
+      ],
+      "env": {
+        "AT_LICENSE_SERVER_HOST": "${user_config.AT_LICENSE_SERVER_HOST}",
+        "AT_LICENSE_SERVER_PORT": "${user_config.AT_LICENSE_SERVER_PORT}",
+        "AT_LICENSE_TOKENS": "${user_config.AT_LICENSE_TOKENS}",
+        "AT_LICENSE_FAIL_FAST": "${user_config.AT_LICENSE_FAIL_FAST}",
+        "AT_MAX_CONCURRENT_JOBS": "${user_config.AT_MAX_CONCURRENT_JOBS}",
+        "AT_DISABLE_RUN_PYTHON": "${user_config.AT_DISABLE_RUN_PYTHON}",
+        "AT_MAX_IMPORT_BYTES": "${user_config.AT_MAX_IMPORT_BYTES}",
+        "UAP_MCP_ALLOWED_ROOTS": "${user_config.UAP_MCP_ALLOWED_ROOTS}"
+      }
+    },
+    "pipeline_automation": {
+      "command": "${CLAUDE_PLUGIN_DATA}/venvs/PA/Scripts/python.exe",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/Pipeline_Automation_MCP/pa_mcp_server.py"
+      ],
+      "env": {
+        "UNITY_VPC_FQDN": "${user_config.UNITY_VPC_FQDN}",
+        "UNITY_VPC_PATH_PREFIX": "${user_config.UNITY_VPC_PATH_PREFIX}",
+        "UNITY_VPC_OPENID_CONFIG_URL": "${user_config.UNITY_VPC_OPENID_CONFIG_URL}",
+        "UNITY_VPC_CLIENT_ID": "${user_config.UNITY_VPC_CLIENT_ID}",
+        "UNITY_VPC_AUTOMATION_PATH": "${user_config.UNITY_VPC_AUTOMATION_PATH}",
+        "UAP_MCP_ALLOWED_ROOTS": "${user_config.UAP_MCP_ALLOWED_ROOTS}"
+      }
+    }
+  }
+}

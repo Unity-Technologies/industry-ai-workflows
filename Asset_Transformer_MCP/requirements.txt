@@ -1,0 +1,80 @@
+# =============================================================================
+# at_mcp_server.py – Python dependencies  |  Python 3.12
+# =============================================================================
+# Install:  pip install -r requirements.txt
+#
+# This file is a full pin set, not a loose range: the Asset Transformer venv
+# also hosts the pxz SDK (installed with --no-deps because its declared pins
+# conflict with the ones below), so every version here is fixed to keep the
+# environment reproducible. Regenerate by resolving `mcp` in a clean 3.12 venv
+# and folding the result back in.
+#
+# pxz (Asset Transformer SDK) is installed from Unity's customer-accessible
+# Pixyz package index:
+#   pip install pxz --no-deps --extra-index-url https://unity3ddist.jfrog.io/artifactory/api/pypi/pixyz-pypi-prod-local/simple
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Asset Transformer SDK (required – installed separately, see install.py)
+# -----------------------------------------------------------------------------
+# pip install pxz==<version> --no-deps --extra-index-url https://unity3ddist.jfrog.io/artifactory/api/pypi/pixyz-pypi-prod-local/simple
+# Per-platform pins (wheels can lag per platform; install.py selects these):
+#   Windows/Linux: 2026.4.0.0   macOS: 2026.3.2.1
+
+# -----------------------------------------------------------------------------
+# MCP framework (required)
+# -----------------------------------------------------------------------------
+mcp==2.0.0
+mcp-types==2.0.0
+
+# HTTP / async runtime (required for --transport sse / streamable-http).
+# mcp 2.x moved from httpx/httpcore to httpx2/httpcore2.
+anyio==4.14.2
+uvicorn==0.52.1
+starlette==1.6.0
+sse-starlette==3.4.8
+httpx2==2.10.0
+httpcore2==2.10.0
+h11==0.16.0
+idna==3.18
+truststore==0.10.4
+python-multipart==0.0.32
+
+# Pydantic (pulled in by mcp). pydantic pins its own matching pydantic-core
+# build exactly, so the two move together — never bump one alone.
+pydantic==2.13.4
+pydantic_core==2.46.4
+annotated-types==0.8.0
+typing_extensions==4.16.0
+typing-inspection==0.4.3
+
+# Schema validation, tracing and token handling (pulled in by mcp)
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+referencing==0.37.0
+rpds-py==2026.6.3
+attrs==26.1.0
+opentelemetry-api==1.44.0
+PyJWT==2.13.0
+cryptography==50.0.0
+cffi==2.1.1
+pycparser==3.0
+
+# Console output helpers (pulled in by uvicorn)
+click==8.4.2
+colorama==0.4.6
+
+# Windows-only, mirroring mcp's own marker (`pywin32>=311; sys_platform == 'win32'`).
+# Must keep the marker: there are no POSIX wheels, so an unconditional pin
+# breaks Linux and macOS installs.
+pywin32==312; sys_platform == "win32"
+
+# Misc
+python-dotenv==1.2.2
+
+# -----------------------------------------------------------------------------
+# Optional – only needed for the render_turntable_video tool
+# -----------------------------------------------------------------------------
+ImageIO==2.37.4
+imageio-ffmpeg==0.6.0
+pillow==12.3.0

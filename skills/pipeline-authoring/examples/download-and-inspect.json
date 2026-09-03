@@ -1,0 +1,76 @@
+{
+  "name": "Download and Inspect Asset",
+  "description": "Downloads an asset from Asset Manager and runs a read-only Asset Transformer script that prints scene statistics to the job log. A minimal get-asset plus custom-script pattern.",
+  "version": "1.0.0",
+  "tags": ["inspect", "asset-transformer"],
+  "inputParameters": [
+    {
+      "name": "projectId",
+      "displayName": "Project",
+      "type": "String",
+      "description": "The project containing the asset to process.",
+      "required": true,
+      "isList": false,
+      "metadata": { "picker": "assetManagerProjectPicker" }
+    },
+    {
+      "name": "assetId",
+      "displayName": "Asset",
+      "type": "String",
+      "description": "The asset containing the files to process.",
+      "required": true,
+      "isList": false,
+      "metadata": {
+        "picker": "assetManagerAssetPicker",
+        "projectField": "projectId"
+      }
+    },
+    {
+      "name": "assetVersionId",
+      "displayName": "Asset Version",
+      "type": "String",
+      "description": "The asset version containing the files to process.",
+      "required": true,
+      "isList": false,
+      "metadata": {
+        "picker": "assetManagerVersionPicker",
+        "projectField": "projectId",
+        "assetField": "assetId"
+      }
+    }
+  ],
+  "steps": [
+    {
+      "id": "get-asset",
+      "name": "Get asset",
+      "action": {
+        "actionId": "ad7cbc97-36d5-46ac-99fc-89ea88025b26-1.1.2-Get-asset",
+        "inputParameters": {
+          "projectId": "{{inputParameters.projectId}}",
+          "assetId": "{{inputParameters.assetId}}",
+          "assetVersionId": "{{inputParameters.assetVersionId}}",
+          "downloadDirectory": "/workspace/input",
+          "downloadDependencies": true
+        },
+        "configurationId": "21a311c6-da72-488a-9688-374824e1c751"
+      },
+      "continueOnFail": false,
+      "timeout": 600,
+      "dependencies": []
+    },
+    {
+      "id": "inspect",
+      "name": "Print scene statistics",
+      "action": {
+        "actionId": "9dadfc21-2cd6-4dff-a31e-7a64967579c9-1.2.1-Execute-custom-script---Requires-Unity-Industry",
+        "inputParameters": {
+          "script": "import argparse, glob, os\nimport pxz\nfrom pxz import io, scene\n\ndef main():\n    p = argparse.ArgumentParser()\n    p.add_argument('--input-dir', default='/workspace/input')\n    a = p.parse_args()\n    sources = [f for f in glob.glob(os.path.join(a.input_dir, '*')) if os.path.isfile(f)]\n    root = io.importScene(sources[0])\n    tris = scene.getPolygonCount([root], asTriangleCount=True)\n    print('file:', os.path.basename(sources[0]))\n    print('triangles:', tris)\n    print('aabb:', scene.getAABB([root]))\n\nif __name__ == '__main__':\n    main()\n"
+        },
+        "configurationId": "21a311c6-da72-488a-9688-374824e1c751"
+      },
+      "continueOnFail": false,
+      "timeout": 600,
+      "dependencies": ["get-asset"]
+    }
+  ]
+}

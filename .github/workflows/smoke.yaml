@@ -1,0 +1,110 @@
+# Smoke checks for what this repository ships.
+#
+# Scope is deliberately narrow. Exercising these servers properly needs Unity
+# Cloud credentials and a Pixyz licence, neither of which belongs in public CI.
+# This job answers a smaller question that is still worth answering on every
+# change: do the manifests parse, do the servers import on a clean machine, and
+# do they still present a well-formed tool surface?
+#
+# Asset Transformer is not covered: it needs the pxz SDK from Unity's Pixyz
+# package index and a licence server, neither of which belongs in public CI.
+
+name: Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  manifests:
+    name: Manifests parse
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate JSON
+        run: |
+          python - <<'PY'
+          import json, sys
+          from pathlib import Path
+
+          failures = []
+          for rel in (
+              ".claude-plugin/plugin.json",
+              ".claude-plugin/marketplace.json",
+              "mcp-servers.json",
+              "hooks/hooks.json",
+          ):
+              try:
+                  json.loads(Path(rel).read_text(encoding="utf-8"))
+              except Exception as exc:
+                  failures.append(f"{rel}: {exc}")
+              else:
+                  print(f"ok   {rel}")
+
+          plugin = json.loads(Path(".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+          market = json.loads(Path(".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+          entry = market["plugins"][0]["name"]
+          if entry != plugin["name"]:
+              failures.append(
+                  f"marketplace entry {entry!r} != plugin name {plugin['name']!r} — these "
+                  "compose into the install command and the plugin data directory"
+              )
+
+          if failures:
+              sys.exit("FAILED:\n  " + "\n  ".join(failures))
+          print(f"\nplugin {plugin['name']} {plugin.get('version', '(unversioned)')}")
+          PY
+
+  servers:
+    name: ${{ matrix.server }} imports (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        server: [Asset_Manager_MCP, Pipeline_Automation_MCP]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install --quiet -r ${{ matrix.server }}/requirements.txt
+      - name: Import and inspect the tool surface
+        shell: bash
+        env:
+          SERVER_DIR: ${{ matrix.server }}
+        run: |
+          python - <<'PY'
+          import asyncio, os, sys
+          from pathlib import Path
+
+          server_dir = Path(os.environ["SERVER_DIR"])
+          sys.path.insert(0, str(Path.cwd()))
+          sys.path.insert(0, str(server_dir))
+
+          module = next(p.stem for p in server_dir.glob("*_mcp_server.py"))
+          server = __import__(module)
+
+          tools = asyncio.run(server.mcp.list_tools())
+          print(f"{module}: {len(tools)} tools")
+
+          problems = []
+          if not tools:
+              problems.append("no tools registered")
+          for tool in tools:
+              if not (tool.description or "").strip():
+                  problems.append(f"{tool.name}: no description")
+              schema = tool.input_schema
+              if not isinstance(schema, dict) or schema.get("type") != "object":
+                  problems.append(f"{tool.name}: input schema is not an object")
+
+          names = [t.name for t in tools]
+          if len(names) != len(set(names)):
+              problems.append("duplicate tool names")
+
+          if problems:
+              sys.exit("FAILED:\n  " + "\n  ".join(problems))
+          print("tool surface OK")
+          PY

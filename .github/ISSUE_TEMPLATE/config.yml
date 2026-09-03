@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://unity.com/security
+    about: Report privately to security@unity3d.com or via Unity's bug bounty — not as a GitHub issue.
+  - name: Unity Industry sales and licensing
+    url: https://unity.com/contact-us?reason=Speak+to+Sales&step=3&topic=Industrial+Solutions
+    about: Asset Transformer needs a Pixyz licence seat; talk to Unity about entitlements.

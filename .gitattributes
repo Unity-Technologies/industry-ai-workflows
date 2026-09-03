@@ -1,0 +1,9 @@
+# Normalize to LF in the repository and on checkout. The stored blobs are
+# already LF; this keeps them that way regardless of a contributor's
+# core.autocrlf, which matters because the SessionStart hook and the CI
+# workflows run through bash, where CRLF breaks shebangs and heredocs.
+* text=auto eol=lf
+
+# Windows-only artifacts that must keep CRLF if they are ever added.
+*.bat text eol=crlf
+*.cmd text eol=crlf

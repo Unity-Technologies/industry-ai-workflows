@@ -1,0 +1,17 @@
+{
+  "$schema": "https://code.claude.com/schemas/marketplace.json",
+  "name": "unity-asset-pipeline-marketplace",
+  "description": "Unity's Asset Manager, Asset Transformer, and Pipeline Automation MCP servers and authoring skills for Claude Code.",
+  "owner": {
+    "name": "Unity Technologies"
+  },
+  "plugins": [
+    {
+      "name": "uap-mcp",
+      "source": "./",
+      "description": "Unity Asset Manager, Asset Transformer, and Pipeline Automation MCP servers + skills.",
+      "category": "unity",
+      "tags": ["unity", "asset-manager", "asset-transformer", "pipeline-automation", "cad", "3d"]
+    }
+  ]
+}

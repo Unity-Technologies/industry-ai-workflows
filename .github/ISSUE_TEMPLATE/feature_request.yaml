@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a tool, parameter, or workflow this toolkit should support.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: |
+        The workflow you're trying to get an agent to carry out, and where it
+        currently stops being possible. Understanding the goal usually matters
+        more than the specific API — there may already be a route.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to see?
+      description: A new tool, an extra parameter, different behaviour, better docs.
+
+  - type: input
+    id: api
+    attributes:
+      label: Relevant Unity API
+      description: If you know the underlying REST endpoint or pxz function, naming it helps.

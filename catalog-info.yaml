@@ -1,0 +1,21 @@
+# For more information about the available options please visit: http://go/catalog-info (VPN required)
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  annotations:
+    github.com/project-slug: Unity-Technologies/unity-asset-pipeline-mcp
+  name: unity-asset-pipeline-mcp
+  description: "Unity Asset Pipeline MCP — experimental MCP toolkit for AI agents to operate Unity Asset Manager, Asset Transformer and Pipeline Automation - enabling conversational CAD/3D processing, asset publishing and cloud pipeline automation."
+  labels:
+    costcenter: "2105"
+  tags:
+    - planned-public
+    - enterprise
+  links:
+    - url: https://unity.slack.com/channels/proj-unity-asset-pipeline-mcp
+      title: "#proj-unity-asset-pipeline-mcp"
+      icon: chat
+spec:
+  type: other
+  lifecycle: experimental
+  owner: Unity-Technologies/industrial-solutions-engineering

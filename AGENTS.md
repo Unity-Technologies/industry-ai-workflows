@@ -1,0 +1,51 @@
+# AGENTS Guide for Unity Asset Pipeline MCP
+
+## Big Picture
+- This repo is a Claude Code plugin bundling three independent MCP servers, each with its own venv and dependencies:
+  - `Asset_Manager_MCP/` -> Unity Cloud Asset Manager operations (`am_mcp_server.py`, REST via `requests` — no SDK)
+  - `Asset_Transformer_MCP/` -> Pixyz/Asset Transformer CAD processing (`at_mcp_server.py`, `pxz` SDK)
+  - `Pipeline_Automation_MCP/` -> Unity Pipeline Automation REST API v1 (`pa_mcp_server.py`)
+- They are not imported into each other; integration is at workflow level (e.g., process with Transformer, then upload with Manager, then automate with Pipeline Automation).
+- `skills/` ships model-facing authoring references (`pipeline-authoring` incl. `automation-api.md`, `at-scripting`, `at-upa-scripting`, `asset-manager-authoring`).
+- `Sample_CAD/` is the conventional (gitignored) location for local CAD files used in Transformer tool validation — users supply their own.
+
+## Architecture and Data Flow
+- Asset Manager and Pipeline Automation authenticate via browser-based Unity user login (PKCE) — the shared `shared/unity_auth/` module, ONE token cache at `~/.uap_mcp/token.json` (`$UAP_MCP_HOME` honored, and the pre-0.6.0 `$AMT_MCP_HOME`/`~/.amt_mcp` adopted once then cleared); `am_utils/am_init.py` and `pa_utils/pa_init.py` are thin re-exports. Login is deferred to the `unity_login` MCP tool; tools short-circuit with a "call unity_login" message when not signed in. One login (or logout) covers both servers.
+- Token refresh is atomic and file-locked across processes; the cache is only cleared on a definitive 400/401/403 from the token endpoint — transient network failures keep it intact.
+- REST layers (`am_utils/am_rest.py`, `pa_utils/pa_utils.py`) route every call through helpers with timeouts (default `(10, 120)`, file transfers `(10, 600)`) and GET-only retry/backoff on 429/5xx. Every Unity-bound request (sessions from `get_session()`, token posts, OIDC discovery, signed-URL transfers) carries `X-Unity-Cloud-Api-Source: uap_mcp@<version>` (gateway attribution, Unity's `[source]@[version]` format) and the `User-Agent` from `shared/version.py` (`UAP_MCP/<version> (<agent>; <OS>)`; `<agent>` = the MCP client name, pushed in by the `tools/call` interceptor in `shared/client_identity.py` and cached once — mcp 2.x has no ambient request context to read it from — so it is `unknown` only before the first tool call) so traffic is attributable server-side; `UAP_MCP_USER_AGENT` overrides it (blank = omit).
+- Private cloud (VPC): `shared/unity_auth/vpc.py` resolves `UNITY_VPC_*` config; when `UNITY_VPC_FQDN` is set the AM/PA REST bases rebase to `https://{fqdn}{prefix}/assets/v1` and the automation base resolved lazily — VPC bundles serve **`api/automation/v1`** (newer) or **`api/automation/v1alpha1`** (older), both verified live; `pa_utils._request` probes v1 first and falls back on a gateway-level plain-text 404 (safe for any method: the request never reached the service), locking the first base that routes; both paths overridable via `UNITY_VPC_ASSETS_PATH` / `UNITY_VPC_AUTOMATION_PATH` and `pkce_auth` runs a standard OIDC PKCE flow against the deployment's Keycloak (realm `unity`, public client `dashboard`) whose access token is the Bearer credential directly — no Genesis/Services exchange. TokenBundles carry `mode`/`issuer` so a token is never used against another deployment. Public-cloud-only on VPC: the entities gateway (`delete_project`) and genesis-id resolution (org ids pass through). Status: experimental.
+- Org identifiers: Unity routes under `/organizations/{id}` take the NUMERIC genesis id, not the org UUID — always resolve via `_get_genesis_id` in `am_mcp_server.py` (no silent fallback; unknown orgs raise, listing what was found).
+- Asset Transformer boots the pxz SDK lazily (`_get_pxz`): a FlexLM license seat is only acquired on the first tool call and only the mandatory token set (extras via `AT_LICENSE_TOKENS`). Seats are released on shutdown or via the `release_license` tool (this clears the in-memory scene); `check_license` reports availability; `AT_LICENSE_FAIL_FAST=1` opts into a startup probe. Node-locked/local license files are not supported.
+- Asset Transformer tools standardize responses through `_ok(...)` / `_err(...)` JSON envelopes; license failures return `_err` with host/port, no traceback.
+- Transformer `run_pipeline` chains `clear_scene -> import_file -> prepare_cad -> optimise_cad` and returns per-stage JSON.
+
+## Runtime and Developer Workflows
+- Install is GitHub-native: `/plugin marketplace add Unity-Technologies/unity-asset-pipeline-mcp` + `/plugin install uap-mcp@unity-asset-pipeline-marketplace`. A `SessionStart` hook (`hooks/hooks.json` → `bootstrap.py`) builds the three server venvs into the plugin's persistent data dir (`$CLAUDE_PLUGIN_DATA`, default `~/.claude/plugins/data/<plugin-id>/venvs/<AM|AT|PA>` — id is `uap-mcp-unity-asset-pipeline-marketplace` for marketplace installs (incl. GitHub) or `uap-mcp-inline` for directory-source registrations; install.default_data_dir detects it, and install.legacy_data_dirs reports pre-0.6.0 ones for cleanup) in a DETACHED background process, guarded by a stamp file (requirements hashes + pxz pin + python + platform — `install.compute_stamp`) and a cross-session lock; servers come up in the next session after the first build. The data dir survives plugin updates (the plugin cache copy does not).
+- The committed `mcp-servers.json` (referenced from `plugin.json` `mcpServers` — deliberately NOT named `.mcp.json` so a dev running Claude Code inside the clone doesn't double-register it as project config) points every server at `${CLAUDE_PLUGIN_DATA}/venvs/<X>/Scripts/python.exe`; on POSIX, `install.ensure_windows_style_launcher` symlinks `Scripts/python.exe -> bin/python` inside each venv so the single Windows-style path works everywhere.
+- `python install.py` (any Python — it discovers a 3.12 itself; AT pins to exactly 3.12, AM/PA accept 3.11+) pre-builds the same data-dir venvs manually and writes the same stamp. `--venv-root DIR` overrides the location, `--in-repo` gives the in-repo `<server>/.venv` dev layout. Partial installs are not supported. `pxz` installs from Unity's customer-accessible Pixyz package index automatically.
+- SessionStart stdout is context: `bootstrap.py` stays silent when everything is ready, and otherwise tells Claude that setup is running in the background and/or that the user is signed out of Unity (offer `unity_login` — the `/mcp` OAuth panel is remote-HTTP-only and does not apply to these stdio servers).
+- `python uninstall.py` removes venvs (data-dir and legacy in-repo), generated files, and ALWAYS all cached auth tokens (verifies a clean state).
+- Run modes: Manager/PA are stdio (`python am_mcp_server.py`); Transformer supports `stdio`, `sse`, `streamable-http/http` with `--host/--port` (HTTP default port 8766; 8765 is reserved for the PKCE login callback). Transformer HTTP mode sets `mcp.settings.stateless_http = True`.
+- Validate changes by running the relevant MCP server and exercising its tools (each server imports cleanly without credentials; auth-gated tools short-circuit with a login message).
+
+## Project-Specific Conventions
+- Tool functions generally return strings, often JSON-serialized payloads (not Python objects).
+- Transformer render/image tools (`take_screenshot`, `take_screenshot_set`, `bake_ambient_occlusion`) return MCP content lists (`TextContent` + `ImageContent`) instead of plain strings.
+- Org/project scope is interactive per session: `list_organizations` → ask the user → `set_default_organization`, then `list_projects` → `set_default_project` (or `create_project`). Tools without a selected org/project return guidance prompts (`_resolve_project_id` lists choices; empty orgs suggest create_project). PA has matching `set_default_organization` / `set_default_project` setters.
+- Asset Manager caches last targeted asset version per process in `_LAST_TARGET_VERSION_BY_ASSET` to keep follow-up upload/status calls on the intended draft.
+- Asset name lookups use the search endpoint's server-side `filter.includeQuery` criteria (exact, case-sensitive) — never page the full asset list client-side.
+- `list_organizations` in Manager falls back to the session default org when the authenticated identity cannot enumerate orgs.
+- Asset Manager reference creation auto-freezes unfrozen target assets when needed (`add_asset_reference`).
+- `delete_project` in Manager archives then hard-deletes via the entities gateway (`services.unity.com/api/unity` — the same routes as the dashboard's Archive/Delete buttons, not part of the documented Assets API). It requires org Owner/Manager and `confirm=True`; without confirm it returns a would-delete summary.
+- Several Manager operations explicitly handle non-ASCII file path upload failures and return remediation hints.
+- Transformer heavy tools are gated by a re-entrant semaphore sized by `AT_MAX_CONCURRENT_JOBS` (default 1).
+- Transformer `run_python` executes arbitrary Python in-process — only run code the user supplied or reviewed.
+- Transformer prompts (`@mcp.prompt`) encode guided multi-step agent behaviors (`optimise_model`, `review_model`, `inspect_scene`, `export_workflow`).
+
+## Integration Points and Secrets
+- Env vars:
+  - Manager / Pipeline Automation: no credentials or presets in env (browser-based user login; org/project chosen per session via the set_default_* tools)
+  - Transformer: `AT_LICENSE_SERVER_HOST` (your FlexLM Pixyz license server, e.g. `licenses.example.com`; no default — tools error clearly when unset), `AT_LICENSE_SERVER_PORT` (default `27005`), plus optional `AT_LICENSE_TOKENS`, `AT_LICENSE_FAIL_FAST`, `AT_MAX_CONCURRENT_JOBS`
+- Use `.env.example` in each server directory as source of truth; do not commit `.env`. Login tokens live only in the shared cache and are removed by `uninstall.py` / `unity_logout`.
+- External systems used at runtime: Unity Cloud REST APIs (`services.api.unity.com`, `automation.services.api.unity.com`) and the Pixyz SDK (`pxz`) with FlexLM license server access.
+- When using stdio transport in Transformer, native SDK stdout is suppressed to protect JSON-RPC framing.
