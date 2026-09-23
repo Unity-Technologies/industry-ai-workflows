@@ -24,8 +24,10 @@
 # -----------------------------------------------------------------------------
 # MCP framework (required)
 # -----------------------------------------------------------------------------
-mcp==2.0.0
-mcp-types==2.0.0
+# mcp pins its own matching mcp-types build exactly (mcp 2.0.0 requires
+# mcp-types 2.0.0), so the two move together — never bump one alone.
+mcp==2.2.0
+mcp-types==2.2.0
 
 # HTTP / async runtime (required for --transport sse / streamable-http).
 # mcp 2.x moved from httpx/httpcore to httpx2/httpcore2.
@@ -33,10 +35,10 @@ anyio==4.14.2
 uvicorn==0.52.1
 starlette==1.6.0
 sse-starlette==3.4.8
-httpx2==2.10.0
-httpcore2==2.10.0
+httpx2==2.12.0
+httpcore2==2.12.0
 h11==0.16.0
-idna==3.18
+idna==3.20
 truststore==0.10.4
 python-multipart==0.0.32
 
@@ -46,7 +48,7 @@ pydantic==2.13.4
 pydantic_core==2.46.4
 annotated-types==0.8.0
 typing_extensions==4.16.0
-typing-inspection==0.4.3
+typing-inspection==0.4.4
 
 # Schema validation, tracing and token handling (pulled in by mcp)
 jsonschema==4.26.0
@@ -55,7 +57,7 @@ referencing==0.37.0
 rpds-py==2026.6.3
 attrs==26.1.0
 opentelemetry-api==1.44.0
-PyJWT==2.13.0
+PyJWT==2.14.0
 cryptography==50.0.0
 cffi==2.1.1
 pycparser==3.0
@@ -70,7 +72,7 @@ colorama==0.4.6
 pywin32==312; sys_platform == "win32"
 
 # Misc
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 
 # -----------------------------------------------------------------------------
 # Optional – only needed for the render_turntable_video tool

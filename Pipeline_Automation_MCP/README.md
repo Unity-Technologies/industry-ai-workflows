@@ -6,6 +6,19 @@ Covers the full pipeline lifecycle — create, version, trigger, monitor jobs, a
 
 ---
 
+> Part of the **Industry AI Workflows** Claude Code plugin marketplace. This
+> plugin installs on its own — you do not need the other Unity plugins.
+>
+> ```text
+> /plugin marketplace add Unity-Technologies/industry-ai-workflows
+> /plugin install upa-mcp@industry-ai-workflows
+> ```
+>
+> That is the whole install: the plugin's SessionStart hook builds this server's
+> environment in the background on first use, and the server comes up in the next
+> session. Everything below is the manual route, for non-Claude MCP clients or
+> development.
+
 ## Prerequisites
 
 - Python 3.11+
@@ -16,8 +29,17 @@ Covers the full pipeline lifecycle — create, version, trigger, monitor jobs, a
 
 ## Installation
 
+This plugin's own installer is what the SessionStart hook runs:
+
+```powershell
+python install.py              # builds into this plugin's Claude Code data dir
+python install.py --in-repo    # or build .venv here, for local development
+```
+
+To set the server up by hand instead, run these from the
+`Pipeline_Automation_MCP` folder:
+
 ```bash
-cd Pipeline_Automation_MCP
 python -m venv .venv
 .venv\Scripts\activate      # Windows
 # source .venv/bin/activate  # macOS / Linux

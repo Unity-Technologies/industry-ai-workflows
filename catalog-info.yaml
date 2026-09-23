@@ -3,9 +3,9 @@ apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
   annotations:
-    github.com/project-slug: Unity-Technologies/unity-asset-pipeline-mcp
-  name: unity-asset-pipeline-mcp
-  description: "Unity Asset Pipeline MCP — experimental MCP toolkit for AI agents to operate Unity Asset Manager, Asset Transformer and Pipeline Automation - enabling conversational CAD/3D processing, asset publishing and cloud pipeline automation."
+    github.com/project-slug: Unity-Technologies/industry-ai-workflows
+  name: industry-ai-workflows
+  description: "Industry AI Workflows — experimental Claude Code plugin marketplace for industry production workflows. Ships separately installable MCP plugins for Unity Asset Manager, Asset Transformer and Pipeline Automation - enabling conversational CAD/3D processing, asset publishing and cloud pipeline automation."
   labels:
     costcenter: "2105"
   tags:

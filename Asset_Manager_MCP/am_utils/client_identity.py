@@ -21,7 +21,7 @@ inside a tool call.
 
 Register it on the server that makes Unity-bound requests:
 
-    from shared.client_identity import ClientIdentityExtension
+    from am_utils.client_identity import ClientIdentityExtension
 
     mcp = MCPServer(name=..., extensions=[ClientIdentityExtension()])
 """

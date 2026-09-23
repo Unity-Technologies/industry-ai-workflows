@@ -14,19 +14,13 @@ first base that routes is locked in for the process.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# The shared VPC config module lives at the repo root (two levels up).
-_REPO_ROOT = str(Path(__file__).resolve().parent.parent.parent)
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-from shared.unity_auth import vpc as _vpc  # noqa: E402
+from .unity_auth import vpc as _vpc
 
 # Candidate bases in preference order. On public cloud (or with an explicit
 # UNITY_VPC_AUTOMATION_PATH) this collapses to a single base and the fallback

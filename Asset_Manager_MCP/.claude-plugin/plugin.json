@@ -1,0 +1,59 @@
+{
+  "name": "uam-mcp",
+  "displayName": "Unity Asset Manager",
+  "version": "0.7.2",
+  "description": "Publish, version and organize assets in Unity Asset Manager — assets and versions, file upload and download, metadata, references, collections and projects.",
+  "author": {
+    "name": "Unity Technologies",
+    "url": "https://github.com/Unity-Technologies"
+  },
+  "homepage": "https://github.com/Unity-Technologies/industry-ai-workflows",
+  "repository": "https://github.com/Unity-Technologies/industry-ai-workflows",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "keywords": [
+    "unity",
+    "asset-manager",
+    "unity-cloud",
+    "dam",
+    "3d"
+  ],
+  "mcpServers": "./mcp-servers.json",
+  "userConfig": {
+    "UNITY_VPC_FQDN": {
+      "type": "string",
+      "title": "Private cloud (VPC) host",
+      "description": "Hostname of your Unity private cloud deployment (e.g. private-cloud.example.com). Leave blank for standard public Unity Cloud. When set, Asset Manager talks to your deployment and sign-in uses its identity service instead of Unity ID. IMPORTANT: if you also use the Unity Pipeline Automation plugin, set the SAME value there. The two share one sign-in, and a token minted for one deployment is refused by the other — a mismatch shows up as a permanent 'not logged in'.",
+      "default": ""
+    },
+    "UNITY_VPC_PATH_PREFIX": {
+      "type": "string",
+      "title": "Private cloud path prefix",
+      "description": "Path prefix in front of the service paths on your private cloud ingress — commonly 'backend' (giving https://<host>/backend/assets/v1/...). Leave blank if the services are served at the host root.",
+      "default": ""
+    },
+    "UNITY_VPC_OPENID_CONFIG_URL": {
+      "type": "string",
+      "title": "Private cloud OpenID configuration URL",
+      "description": "Optional override for the deployment's OpenID Connect discovery URL. Leave blank to use the standard location (https://<host>/auth/realms/unity/.well-known/openid-configuration).",
+      "default": ""
+    },
+    "UNITY_VPC_CLIENT_ID": {
+      "type": "string",
+      "title": "Private cloud OAuth client id",
+      "description": "Public OAuth client used for the browser sign-in on your private cloud. Defaults to 'dashboard'.",
+      "default": "dashboard"
+    },
+    "UNITY_VPC_ASSETS_PATH": {
+      "type": "string",
+      "title": "Private cloud Asset Manager service path",
+      "description": "Service path for Asset Manager on your private cloud, relative to the host and prefix. Defaults to 'assets/v1'.",
+      "default": "assets/v1"
+    },
+    "UAP_MCP_ALLOWED_ROOTS": {
+      "type": "string",
+      "title": "Restrict file access to these directories",
+      "description": "Optional list of directories (separated by ';' on Windows, ':' elsewhere) that every local file this server reads or writes must sit inside — uploads and downloads. Leave blank (default) to allow any location except credential stores and auto-executed startup files, which are always refused. Plugin settings are per plugin: if you also use the Unity Asset Transformer plugin, set the same value there.",
+      "default": ""
+    }
+  }
+}

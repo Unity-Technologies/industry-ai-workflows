@@ -1,48 +1,53 @@
 #!/usr/bin/env python3
 """
-Unity Asset Pipeline MCP installer
-==================================
+Unity Asset Manager MCP installer
+=================================
 
-One-shot installer for the three MCP servers in this repo. For each server it
-creates a venv and pip-installs its dependencies. The Asset Transformer SDK
-(`pxz`) is installed from Unity's customer-accessible Pixyz package index
-automatically.
+Builds the venv for the Asset Manager MCP server: creates it and pip-installs this
+server's dependencies from its hash-pinned requirements.lock.
 
-Venvs are built into the Claude Code plugin's persistent data directory
-(`~/.claude/plugins/data/<plugin-id>/venvs/<AM|AT|PA>`) by
-default (the exact id depends on how the marketplace was registered; the
-setup detects it — see default_data_dir). That location survives plugin updates (Claude Code replaces the
-plugin's cached source on every update, so venvs must not live inside the
-plugin itself) and is exactly where the committed `mcp-servers.json` points,
-so the same config file works on every machine and OS.
 
-NOTE: when the plugin is installed through Claude Code (GitHub or local
-marketplace), running this script is OPTIONAL — the plugin's SessionStart
-hook (`bootstrap.py`) builds the same venvs automatically on first use.
-Run it manually to pre-build them, or for standalone/dev setups.
+The venv is built into THIS plugin's persistent data directory
+(`~/.claude/plugins/data/<plugin-id>/venvs/{code}`) by default. The exact id
+depends on how the marketplace was registered; the setup detects it — see
+default_data_dir. That location survives plugin updates (Claude Code replaces a
+plugin's cached source on every update, so venvs must not live inside the plugin
+itself) and is exactly where this plugin's committed `mcp-servers.json` points,
+so one config file works on every machine and OS.
+
+Each plugin in the Industry AI Workflows marketplace installs independently and
+owns its own copy of this script. Claude Code copies only a plugin's own subtree
+into its cache, so a shared installer at the repo root would simply not exist on
+an installed machine. The three copies are deliberate duplicates: keep them
+structurally identical so they stay diffable, but they may diverge.
+
+NOTE: when the plugin is installed through Claude Code, running this script is
+OPTIONAL — the plugin's SessionStart hook (`bootstrap.py`) builds the same venv
+automatically on first use. Run it manually to pre-build it, or for
+standalone/dev setups.
 
 Usage
 -----
-    python install.py                       # build venvs into the plugin data dir
-    python install.py --recreate            # delete existing venvs before install
-    python install.py --python python3.12   # use this interpreter for new venvs
-    python install.py --venv-root DIR       # build venvs under DIR instead (dev)
-    python install.py --in-repo             # legacy layout: .venv inside each MCP folder
+    python install.py                       # build the venv into the plugin data dir
+    python install.py --recreate            # delete the existing venv first
+    python install.py --python python3.12   # use this interpreter
+    python install.py --venv-root DIR       # build under DIR instead (dev)
+    python install.py --in-repo             # legacy layout: .venv inside this folder
 
 Notes
 -----
-- All three MCPs are always installed together — the Claude Code plugin
-  requires all three servers, and a partial install would leave the MCP
-  config pointing at venvs that don't exist.
-- Asset Transformer requires exactly Python 3.12 (its deps are pinned); Asset
-  Manager and Pipeline Automation accept 3.11+. The whole install therefore
-  needs a Python 3.12 interpreter. If the interpreter running this script is
-  not 3.12, a 3.12 is auto-discovered (`py -3.12`, `python3.12`, ...); pass
-  `--python <path-to-python3.12>` to pick one explicitly.
-- The installer never deletes existing venvs unless `--recreate` is passed.
+- This server accepts Python 3.11+, but the venv is currently built with
+  3.12 because the venv stamp records the interpreter series and relaxing
+  it would invalidate every existing stamp and force a rebuild. Widening
+  to 3.11 is a deliberate, separate change.
+
+- Signing in is browser-based and shared: one `unity_login` also
+  authenticates the Unity Pipeline Automation plugin, because the token
+  cache lives at ~/.uap_mcp/token.json and carries no plugin identity.
+- The installer never deletes an existing venv unless `--recreate` is passed.
   Re-running is safe.
 - Credentials and env vars are NOT configured here. Use the Claude Code
-  plugin's userConfig prompt, or copy each MCP's `.env.example` to `.env`.
+  plugin's userConfig prompt, or copy `.env.example` to `.env`.
 """
 
 from __future__ import annotations
@@ -58,20 +63,14 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
+# This file lives at the plugin root, which is also the server folder. The
+# spec below uses folder="." so every path expression that was written against
+# a repo containing several server directories still resolves correctly.
+PLUGIN_ROOT = Path(__file__).resolve().parent
 
-# Unity's customer-accessible Pixyz package index (hosts the `pxz` SDK)
-AT_INDEX = "https://unity3ddist.jfrog.io/artifactory/api/pypi/pixyz-pypi-prod-local/simple"
-
-# pxz publishes per-platform wheels (win_amd64, manylinux x86_64, macosx
-# universal2) and platform releases can lag each other — pin the newest wheel
-# available for THIS platform. Keep in sync with the note in
-# Asset_Transformer_MCP/requirements.txt.
-PXZ_VERSION = {
-    "win32": "2026.4.0.0",
-    "linux": "2026.4.0.0",
-    "darwin": "2026.3.2.1",  # macOS wheels currently trail win/linux
-}.get(sys.platform, "2026.4.0.0")
+# Kept as an alias so the shared body below reads the same in all three
+# plugins' copies and stays diffable against them.
+REPO_ROOT = PLUGIN_ROOT
 
 # Candidate data-directory ids, in preference order. Observed empirically
 # ($CLAUDE_PLUGIN_DATA in real hook/server runs): a GitHub- or local-
@@ -80,7 +79,7 @@ PXZ_VERSION = {
 # `<plugin>-inline`. These constants are only the fallback for manual runs —
 # inside hook and MCP-server processes Claude Code sets $CLAUDE_PLUGIN_DATA
 # directly and that always wins (see default_data_dir).
-PLUGIN_DATA_IDS = ("uap-mcp-unity-asset-pipeline-marketplace", "uap-mcp-inline")
+PLUGIN_DATA_IDS = ("uam-mcp-industry-ai-workflows", "uam-mcp-inline")
 
 # Data-directory ids from before the 0.6.0 rename, plus the mixed form a user
 # lands on if they pull the renamed plugin while their locally registered
@@ -88,13 +87,19 @@ PLUGIN_DATA_IDS = ("uap-mcp-unity-asset-pipeline-marketplace", "uap-mcp-inline")
 # PLUGIN_DATA_IDS, because default_data_dir() must never resolve *to* one of
 # these: a renamed plugin would then keep building into the old directory.
 LEGACY_PLUGIN_DATA_IDS = (
+    # The single bundled plugin this one was split out of (0.6.x), and the
+    # pre-0.6.0 names before that. Its venvs are multiple GB and nothing
+    # reaches them any more.
+    "uap-mcp-unity-asset-pipeline-marketplace",
+    "uap-mcp-inline",
+    "uap-mcp-amt-mcp-marketplace",
     "amt-mcp-amt-mcp-marketplace",
     "amt-mcp-inline",
-    "uap-mcp-amt-mcp-marketplace",
 )
 
-# Every server venv is created with Python 3.12: AT's deps are pinned to
-# exactly 3.12 and AM/PA accept 3.11+, so 3.12 is the intersection.
+# The venv is created with Python 3.12. This value also feeds the venv
+# stamp, so changing it invalidates every existing stamp and forces a
+# rebuild — widen it deliberately, not incidentally.
 REQUIRED_PYTHON = (3, 12)
 
 STAMP_SCHEMA = 1
@@ -119,7 +124,7 @@ SPECS: list[McpSpec] = [
     McpSpec(
         code="AM",
         name="Asset Manager",
-        folder="Asset_Manager_MCP",
+        folder=".",
         server_script="am_mcp_server.py",
         mcp_key="asset_manager",
         python_min=(3, 11),
@@ -130,46 +135,6 @@ SPECS: list[McpSpec] = [
             "UNITY_VPC_OPENID_CONFIG_URL",
             "UNITY_VPC_CLIENT_ID",
             "UNITY_VPC_ASSETS_PATH",
-            "UAP_MCP_ALLOWED_ROOTS",
-        ),
-    ),
-    McpSpec(
-        code="AT",
-        name="Asset Transformer",
-        folder="Asset_Transformer_MCP",
-        server_script="at_mcp_server.py",
-        mcp_key="asset_transformer",
-        pre_install=(
-            ("install", f"pxz=={PXZ_VERSION}", "--no-deps", "--extra-index-url", AT_INDEX),
-        ),
-        python_min=(3, 12),
-        python_max=(3, 12),
-        needs_license_server=True,
-        user_config_env=(
-            "AT_LICENSE_SERVER_HOST",
-            "AT_LICENSE_SERVER_PORT",
-            "AT_LICENSE_TOKENS",
-            "AT_LICENSE_FAIL_FAST",
-            "AT_MAX_CONCURRENT_JOBS",
-            "AT_DISABLE_RUN_PYTHON",
-            "AT_MAX_IMPORT_BYTES",
-            "UAP_MCP_ALLOWED_ROOTS",
-        ),
-    ),
-    McpSpec(
-        code="PA",
-        name="Pipeline Automation",
-        folder="Pipeline_Automation_MCP",
-        server_script="pa_mcp_server.py",
-        mcp_key="pipeline_automation",
-        python_min=(3, 11),
-        needs_unity_auth=True,
-        user_config_env=(
-            "UNITY_VPC_FQDN",
-            "UNITY_VPC_PATH_PREFIX",
-            "UNITY_VPC_OPENID_CONFIG_URL",
-            "UNITY_VPC_CLIENT_ID",
-            "UNITY_VPC_AUTOMATION_PATH",
             "UAP_MCP_ALLOWED_ROOTS",
         ),
     ),
@@ -294,7 +259,17 @@ def compute_stamp(root: Path = REPO_ROOT, specs: list[McpSpec] | None = None) ->
 
 
 def stamp_path(venv_parent: Path) -> Path:
-    return venv_parent / "stamp.json"
+    """This plugin's build stamp.
+
+    Named per server code, not a bare `stamp.json`. In the default layout each
+    plugin owns its own $CLAUDE_PLUGIN_DATA so a shared name would be harmless,
+    but `--venv-root` lets several plugins build into ONE directory (the
+    non-Claude-client setup in the README tells you to do exactly that), and a
+    shared name meant the second install silently overwrote the first's stamp.
+    The first plugin then failed its currency check forever and rebuilt its
+    venv on every session.
+    """
+    return venv_parent / f"stamp-{SPECS[0].code}.json"
 
 
 def read_stamp(venv_parent: Path) -> dict | None:
@@ -435,13 +410,11 @@ def run(cmd: list[str], cwd: Path | None = None) -> None:
 def run_pip_audited(pip: list[str], args: list[str]) -> None:
     """Run a pip install and print what it actually fetched, with hashes.
 
-    The pxz SDK cannot be hash-pinned in the repository the way the PyPI dependencies
-    are: Unity publishes a wheel per platform and the platform releases lag each other
-    (see PXZ_VERSION), so a checked-in hash set would either be wrong for two of the
-    three platforms or would have to be rewritten on every partial release — which is
-    exactly the kind of maintenance that ends with the check disabled.
+    This server's dependencies install from a hash-pinned requirements.lock, so they
+    are verified before any of them executes. This helper covers anything installed
+    outside that path.
 
-    What we can do is make the install auditable after the fact. `pip --report` records
+    `pip --report` records
     the resolved URL and the artifact's own hash for everything installed, so the
     filename and SHA256 of the wheel that ran on this machine end up in the install
     output — and, because the SessionStart build is detached, in bootstrap.log. If a
@@ -647,67 +620,15 @@ def build_venvs(
 
 
 # ---------------------------------------------------------------------------
-# .env helpers (Asset Transformer license prompt, standalone use)
-# ---------------------------------------------------------------------------
-
-def _read_env_file(path: Path) -> tuple[list[str], dict[str, int]]:
-    """Return (lines, key->line_index) for an existing .env, or empty if missing.
-
-    Preserves comments / blank lines so re-running the installer doesn't shred
-    a hand-edited .env. Only KEY=VALUE lines (no leading whitespace) are tracked
-    in the index.
-    """
-    if not path.exists():
-        return [], {}
-    raw = path.read_text(encoding="utf-8").splitlines()
-    index: dict[str, int] = {}
-    for i, line in enumerate(raw):
-        if not line or line.lstrip().startswith("#"):
-            continue
-        if "=" in line and not line.startswith((" ", "\t")):
-            key = line.split("=", 1)[0].strip()
-            if key:
-                index[key] = i
-    return raw, index
-
-
-def _write_env_value(path: Path, key: str, value: str) -> None:
-    """Set KEY=value in .env at `path`, creating the file if needed and
-    updating in place when the key already exists."""
-    lines, index = _read_env_file(path)
-    new_line = f"{key}={value}"
-    if key in index:
-        lines[index[key]] = new_line
-    else:
-        if lines and lines[-1] != "":
-            lines.append("")
-        lines.append(new_line)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def prompt_license_server(spec: McpSpec) -> str | None:
-    """Ask for the Pixyz license server hostname. Returns the host string, or
-    None if the user skipped (leaves AT_LICENSE_SERVER_HOST unset)."""
-    print(f"\n--- {spec.name}: configure Pixyz license server ---")
-    print("  When used as a Claude Code plugin, the license server comes from the")
-    print("  plugin's own settings prompt — you can skip this (press Enter).")
-    print("  For standalone use, enter the hostname of your Pixyz license server")
-    print("  (e.g. licenses.example.com) to store it in the server's .env.")
-    host = input("  License server host: ").strip()
-    return host or None
-
-
-# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
 def resolve_base_python(cli_python: str | None) -> str:
-    """Pick the interpreter used to create the venvs. Asset Transformer's
-    dependencies are pinned for exactly Python 3.12, while AM/PA accept
-    3.11+, so the intersection is exactly 3.12. A partial install would
-    leave the MCP config referencing venvs that don't exist, so we refuse
-    to start rather than skip individual MCPs.
+    """Pick the interpreter used to create the venv.
+
+    Asset Manager's venv is built with Python 3.12 (see REQUIRED_PYTHON).
+    Refusing here beats building a venv this plugin's mcp-servers.json then
+    points at but cannot run.
     """
     if cli_python:
         try:
@@ -717,8 +638,7 @@ def resolve_base_python(cli_python: str | None) -> str:
         if version != REQUIRED_PYTHON:
             need = ".".join(map(str, REQUIRED_PYTHON))
             raise SystemExit(
-                f"Python {need} is required to install all three MCPs "
-                f"(Asset Transformer's dependencies are pinned for {need}), but "
+                f"Python {need} is required for this server's venv, but "
                 f"`{cli_python}` is {'.'.join(map(str, version))}."
             )
         return cli_python
@@ -727,8 +647,7 @@ def resolve_base_python(cli_python: str | None) -> str:
     if not found:
         need = ".".join(map(str, REQUIRED_PYTHON))
         raise SystemExit(
-            f"Python {need} is required (Asset Transformer's dependencies are "
-            f"pinned for {need}) but none was found on this machine.\n"
+            f"Python {need} is required but none was found on this machine.\n"
             f"Install it from https://www.python.org/downloads/ and re-run, or "
             f"point at one explicitly:\n"
             f"    python install.py --python <path-to-python3.12>"
@@ -737,7 +656,8 @@ def resolve_base_python(cli_python: str | None) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Install Unity Asset Pipeline MCP server venvs.")
+    parser = argparse.ArgumentParser(
+        description="Install the Unity Asset Manager MCP server venv.")
     parser.add_argument(
         "--python",
         default=None,
@@ -747,14 +667,14 @@ def main() -> int:
     parser.add_argument(
         "--venv-root",
         default=None,
-        help="Directory to create the venvs in (one per server: AM/, AT/, PA/). "
+        help="Directory to create the venv in. "
              f"Default: the Claude Code plugin data dir "
              f"({default_venv_parent()}).",
     )
     parser.add_argument(
         "--in-repo",
         action="store_true",
-        help="Legacy/dev layout: create each venv as .venv inside its MCP folder "
+        help="Legacy/dev layout: create the venv as .venv inside this folder. "
              "Not used by the plugin.",
     )
     parser.add_argument(
@@ -778,13 +698,12 @@ def main() -> int:
 
     base_python = resolve_base_python(args.python)
 
-    print(f"Unity Asset Pipeline MCP installer | repo root: {REPO_ROOT}")
+    print(f"Unity Asset Manager MCP installer | plugin root: {PLUGIN_ROOT}")
     print(f"Base Python: {base_python}")
-    print(f"Targets: {[s.code for s in SPECS]}")
 
     results: dict[str, bool] = {}
     if args.in_repo:
-        print("Layout: legacy in-repo (<server>/.venv)")
+        print("Layout: legacy in-repo (./.venv)")
         for spec in SPECS:
             try:
                 ok = install_mcp(
@@ -814,27 +733,11 @@ def main() -> int:
         if spec.needs_unity_auth:
             print(f"  [note] {spec.name} uses browser-based Unity user login. "
                   "Run the `unity_login` MCP tool the first time you use the server.")
-        if spec.needs_license_server and not args.non_interactive:
-            try:
-                host = prompt_license_server(spec)
-            except (EOFError, KeyboardInterrupt):
-                print("\n  (no input — leaving AT_LICENSE_SERVER_HOST unset)")
-                host = None
-            if host:
-                env_path = REPO_ROOT / spec.folder / ".env"
-                _write_env_value(env_path, "AT_LICENSE_SERVER_HOST", host)
-                print(f"  [ok] Wrote AT_LICENSE_SERVER_HOST={host} to {env_path}")
 
     print("\n=== Summary ===")
     for code, ok in results.items():
         status = "OK" if ok else "FAILED / SKIPPED"
         print(f"  {code}: {status}")
-
-    stale_mcp_json = REPO_ROOT / ".mcp.json"
-    if stale_mcp_json.exists():
-        print(f"\nNote: {stale_mcp_json} is a leftover from an older version of this plugin. "
-              f"The plugin now ships its MCP config in mcp-servers.json — delete the "
-              f"old .mcp.json to avoid double registration.")
 
     return 0 if all(results.values()) else 1
 

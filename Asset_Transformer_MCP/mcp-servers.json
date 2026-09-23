@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "asset_transformer": {
+      "command": "${CLAUDE_PLUGIN_DATA}/venvs/AT/Scripts/python.exe",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/at_mcp_server.py"
+      ],
+      "env": {
+        "AT_LICENSE_SERVER_HOST": "${user_config.AT_LICENSE_SERVER_HOST}",
+        "AT_LICENSE_SERVER_PORT": "${user_config.AT_LICENSE_SERVER_PORT}",
+        "AT_MAX_CONCURRENT_JOBS": "${user_config.AT_MAX_CONCURRENT_JOBS}",
+        "AT_DISABLE_RUN_PYTHON": "${user_config.AT_DISABLE_RUN_PYTHON}",
+        "UAP_MCP_ALLOWED_ROOTS": "${user_config.UAP_MCP_ALLOWED_ROOTS}"
+      }
+    }
+  }
+}
