@@ -32,11 +32,18 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-# Fixed relative path (shared/ -> repo root -> .claude-plugin/plugin.json).
+# Fixed relative path to the manifest that owns this copy of the module.
 # Correct in all three layouts: plugin cache, dev checkout, setup-exe
 # extraction. Deliberately not an upward directory walk, which could find a
 # different plugin's manifest.
-MANIFEST_PATH = Path(__file__).resolve().parent.parent / ".claude-plugin" / "plugin.json"
+#
+# <pkg>/version.py -> <pkg> -> the plugin root, which holds this plugin's own
+# .claude-plugin/plugin.json. Each plugin reports ITS OWN version.
+#
+# Getting this wrong is silent: plugin_version() catches everything and returns
+# "unknown", so the attribution headers would degrade to uap_mcp@unknown with
+# nothing failing. tests/test_user_agent.py pins it against the real manifest.
+MANIFEST_PATH = Path(__file__).resolve().parents[1] / ".claude-plugin" / "plugin.json"
 
 PRODUCT = "UAP_MCP"
 ENV_USER_AGENT = "UAP_MCP_USER_AGENT"

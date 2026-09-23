@@ -4,6 +4,19 @@ MCP server that exposes Asset Transformer SDK (`pxz`) capabilities for CAD/3D pr
 
 Main entrypoint: `at_mcp_server.py`
 
+> Part of the **Industry AI Workflows** Claude Code plugin marketplace. This
+> plugin installs on its own — you do not need the other Unity plugins.
+>
+> ```text
+> /plugin marketplace add Unity-Technologies/industry-ai-workflows
+> /plugin install uat-mcp@industry-ai-workflows
+> ```
+>
+> That is the whole install: the plugin's SessionStart hook builds this server's
+> environment in the background on first use, and the server comes up in the next
+> session. Everything below is the manual route, for non-Claude MCP clients or
+> development.
+
 ## Prerequisites
 
 - Python 3.12
@@ -12,9 +25,16 @@ Main entrypoint: `at_mcp_server.py`
 
 ## Install
 
-The repo-level installer (`python install.py` from the repo root) handles everything
-below automatically, including the `pxz` install. To set this server up manually,
-run these commands from the `Asset_Transformer_MCP` folder:
+This plugin's own installer handles everything below automatically, including
+the `pxz` install, and is what the SessionStart hook runs:
+
+```powershell
+python install.py              # builds into this plugin's Claude Code data dir
+python install.py --in-repo    # or build .venv here, for local development
+```
+
+To set the server up by hand instead, run these from the `Asset_Transformer_MCP`
+folder:
 
 ```powershell
 python -m venv .venv
@@ -45,9 +65,13 @@ AT_LICENSE_SERVER_PORT=27005
 Optional settings (see `.env.example` for details):
 
 ```
+AT_MAX_CONCURRENT_JOBS=1  # cap on simultaneous heavy AT operations (default: 1, 0 = unlimited)
+
+# Environment-only — read if set, but not offered by /plugin configure, because
+# they are expert or shared-host options rather than per-user preferences:
 AT_LICENSE_TOKENS=        # extra comma-separated Pixyz feature tokens (default: none)
 AT_LICENSE_FAIL_FAST=1    # validate license availability at startup (default: off/lazy)
-AT_MAX_CONCURRENT_JOBS=1  # cap on simultaneous heavy AT operations (default: 1, 0 = unlimited)
+AT_MAX_IMPORT_BYTES=0     # refuse CAD imports above this size (default: no limit)
 ```
 
 ## License seat behaviour

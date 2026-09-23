@@ -60,12 +60,7 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _DOTENV_PATH = os.path.join(_SCRIPT_DIR, ".env")
 load_dotenv(dotenv_path=_DOTENV_PATH)
 
-# The shared path guard lives at the repo root (one level up), same arrangement as
-# Asset_Manager_MCP/am_utils/am_rest.py.
-_REPO_ROOT = os.path.dirname(_SCRIPT_DIR)
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-from shared.local_paths import assert_safe_local_path  # noqa: E402
+from at_utils.local_paths import assert_safe_local_path  # noqa: E402
 
 from mcp.types import ImageContent, PromptMessage, TextContent
 # AT SDK bootstrap
@@ -479,7 +474,7 @@ def _safe_out(path: str, purpose: str = "export") -> str:
     destinations that turn "wrote a file" into "runs next session" (shell rc files,
     site-packages, the plugin's own hooks) and the credential paths, which is worth having
     against a mistyped path or an injected instruction even when exec is available.
-    See shared/local_paths.py.
+    See at_utils/local_paths.py.
     """
     return assert_safe_local_path(path, purpose=purpose, mode="write")
 

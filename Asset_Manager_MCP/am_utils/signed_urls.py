@@ -22,7 +22,7 @@ public. Callers additionally pass `allow_redirects=False`, because a validated U
 to an internal host defeats the validation — safe to disable, since a signed storage URL
 addresses the object directly (verified against a real 1.8 MB download).
 
-NOT in scope: the private-cloud OpenID config URL in `shared/unity_auth/pkce_auth.py`. That
+NOT in scope: the private-cloud OpenID config URL in `am_utils/unity_auth/pkce_auth.py`. That
 one is operator-configured rather than server-supplied, and in a private-cloud deployment it
 is *legitimately* an internal host — applying this check there would break VPC mode.
 

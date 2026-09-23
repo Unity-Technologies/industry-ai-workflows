@@ -1,6 +1,6 @@
 # pa_mcp_server.py dependencies.
 # Floors match the versions the server is developed/tested against;
 # caps exclude the next major version of each package.
-mcp[cli]>=2.0.0,<3
-python-dotenv>=1.2.2,<2
+mcp[cli]>=2.2.0,<3
+python-dotenv>=1.2.3,<2
 requests>=2.34.2,<3

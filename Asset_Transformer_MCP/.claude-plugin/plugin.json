@@ -1,0 +1,57 @@
+{
+  "name": "uat-mcp",
+  "displayName": "Unity Asset Transformer",
+  "version": "0.7.2",
+  "description": "Prepare and optimise CAD data locally with the Unity Asset Transformer (pxz) SDK — import, repair, tessellate, decimate, bake, render and export. Requires a Pixyz license seat.",
+  "author": {
+    "name": "Unity Technologies",
+    "url": "https://github.com/Unity-Technologies"
+  },
+  "homepage": "https://github.com/Unity-Technologies/industry-ai-workflows",
+  "repository": "https://github.com/Unity-Technologies/industry-ai-workflows",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "keywords": [
+    "unity",
+    "asset-transformer",
+    "pixyz",
+    "cad",
+    "3d",
+    "optimisation"
+  ],
+  "mcpServers": "./mcp-servers.json",
+  "userConfig": {
+    "AT_LICENSE_SERVER_HOST": {
+      "type": "string",
+      "title": "Asset Transformer license server host",
+      "description": "Hostname of the Pixyz license server.",
+      "default": ""
+    },
+    "AT_LICENSE_SERVER_PORT": {
+      "type": "number",
+      "title": "Asset Transformer license server port",
+      "description": "Port of the Pixyz FlexLM license server.",
+      "default": 27005,
+      "min": 1,
+      "max": 65535
+    },
+    "AT_MAX_CONCURRENT_JOBS": {
+      "type": "number",
+      "title": "Asset Transformer max concurrent jobs",
+      "description": "Maximum number of heavy Asset Transformer operations (import, prepare, optimise, export, render, bake) allowed to run at the same time in this server, so limited license seats/machines are not overwhelmed. Set 0 for unlimited.",
+      "default": 1,
+      "min": 0
+    },
+    "AT_DISABLE_RUN_PYTHON": {
+      "type": "boolean",
+      "title": "Disable the Asset Transformer run_python tool",
+      "description": "Do not offer the run_python tool at all. It executes arbitrary Python inside the Asset Transformer process by design (the at-scripting workflow depends on it), so it is available by default; turn it off on shared or CI machines where nothing should be able to run code as this user. The scene, import, optimise, render and export tools are unaffected.",
+      "default": false
+    },
+    "UAP_MCP_ALLOWED_ROOTS": {
+      "type": "string",
+      "title": "Restrict file access to these directories",
+      "description": "Optional list of directories (separated by ';' on Windows, ':' elsewhere) that every local file this server reads or writes must sit inside — CAD imports, exports, screenshots, renders and recorder dumps. Leave blank (default) to allow any location except credential stores and auto-executed startup files, which are always refused. Plugin settings are per plugin: if you also use the Unity Asset Manager plugin, set the same value there.",
+      "default": ""
+    }
+  }
+}

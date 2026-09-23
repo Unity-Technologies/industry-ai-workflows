@@ -502,7 +502,21 @@ constraints, only documented action IDs):
   how to pass a runtime value via `parameters` and how to wire `create-asset`
   outputs into a downstream `add-file` step.
 
-Prefer adapting an example over authoring a pipeline from scratch. The Python
-inside each `Execute custom script` step follows the `at-upa-scripting`
-conventions (argparse, `/workspace` paths); the pxz API it calls is documented in
-`../at-scripting/pxz-api-reference.md`.
+Prefer adapting an example over authoring a pipeline from scratch.
+
+### The `script` field of an "Execute custom script" step
+
+This skill covers the pipeline JSON around the step, not the Python inside it.
+
+That script body is Asset Transformer (pxz) code. It is authored with the
+**`at-upa-scripting`** skill, which ships with the **Unity Asset Transformer**
+plugin (`/plugin install uat-mcp@industry-ai-workflows`) and
+carries the authoritative pxz API reference. The two plugins install
+separately, so that reference is not reachable from here by path — ask for the
+skill by name.
+
+If the Asset Transformer plugin is not installed: author the step's JSON here,
+leave `script` as a placeholder, and tell the user that writing the body needs
+that plugin. **Do not invent pxz calls from memory.** The SDK surface is
+version-specific, and a wrong call fails at pipeline runtime — minutes later,
+in a container log, after the earlier steps have already run.

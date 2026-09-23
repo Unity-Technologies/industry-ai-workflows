@@ -143,8 +143,10 @@ def _repo_autoexec_paths() -> tuple[Path, ...]:
     legitimately export scenes and dump recorder scripts into it, and `dump_recorded_script`
     writes `.py` files on purpose. Only the files something else runs by itself are closed.
     """
-    # This file lives at <repo>/shared/local_paths.py.
-    repo = Path(__file__).resolve().parent.parent
+    # <pkg>/local_paths.py -> <pkg> -> the plugin root, which is where this
+    # plugin's install.py, bootstrap.py, hooks/ and manifests live. Getting it
+    # wrong silently stops guarding the real files.
+    repo = Path(__file__).resolve().parents[1]
     return tuple(
         repo / name
         for name in ("bootstrap.py", "install.py", "uninstall.py", "hooks",

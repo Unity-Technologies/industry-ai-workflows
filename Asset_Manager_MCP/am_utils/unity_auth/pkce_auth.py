@@ -37,7 +37,7 @@ sweeps.
 
 Private cloud (VPC) mode
 ------------------------
-When UNITY_VPC_FQDN is set (see shared/unity_auth/vpc.py) this module drives a
+When UNITY_VPC_FQDN is set (see the vpc module beside this one) this module drives a
 standard OIDC PKCE flow against the deployment's embedded Keycloak instead of
 the public-cloud proxy flow, per Unity VPC deployment docs:
 

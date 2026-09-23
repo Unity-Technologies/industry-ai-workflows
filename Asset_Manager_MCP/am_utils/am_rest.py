@@ -7,8 +7,6 @@ Auth is handled externally by am_init.get_session().
 
 from __future__ import annotations
 
-import sys
-
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,15 +16,10 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# The shared VPC config module lives at the repo root (two levels up).
-_REPO_ROOT = str(Path(__file__).resolve().parent.parent.parent)
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-from shared.local_paths import assert_safe_local_path  # noqa: E402
-from shared.unity_auth import vpc as _vpc  # noqa: E402
-from shared.version import attribution_headers  # noqa: E402
-
+from .local_paths import assert_safe_local_path
 from .signed_urls import open_transfer_session
+from .unity_auth import vpc as _vpc
+from .version import attribution_headers
 
 # ---------------------------------------------------------------------------
 # Base URLs
@@ -1006,7 +999,7 @@ def upload_file(
     # The caller chose this path and we are about to read the file and PUT its bytes to
     # cloud storage, from which they can be downloaded again. This server has no code
     # execution of its own, so an agent talked into "back up ~/.ssh/id_rsa" is a real
-    # escalation rather than a restatement of one — see shared/local_paths.py.
+    # escalation rather than a restatement of one — see am_utils/local_paths.py.
     local_path = assert_safe_local_path(local_path, purpose="upload", mode="read")
     file_path = Path(local_path)
     target_path = (remote_path or file_path.name).replace("\\", "/").lstrip("/")
@@ -1078,7 +1071,7 @@ def download_file(
     # Downloaded bytes are attacker-influenced (anyone who can upload an asset picks
     # them), so where they land matters: a write into an auto-loaded location is a
     # persistence primitive. Checked before the request, not after — see
-    # shared/local_paths.py.
+    # am_utils/local_paths.py.
     dest_path = assert_safe_local_path(dest_path, purpose="download", mode="write")
 
     encoded = urllib.parse.quote(file_id, safe="")

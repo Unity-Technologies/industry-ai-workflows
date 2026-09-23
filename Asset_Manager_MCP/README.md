@@ -1,8 +1,21 @@
 # Asset Manager MCP
 
-MCP server that exposes Unity Cloud Asset Manager capabilities for org, project, asset, collection, reference, and metadata management.
+MCP server that exposes Unity Asset Manager capabilities for org, project, asset, collection, reference, and metadata management.
 
 Main entrypoint: `am_mcp_server.py`
+
+> Part of the **Industry AI Workflows** Claude Code plugin marketplace. This
+> plugin installs on its own — you do not need the other Unity plugins.
+>
+> ```text
+> /plugin marketplace add Unity-Technologies/industry-ai-workflows
+> /plugin install uam-mcp@industry-ai-workflows
+> ```
+>
+> That is the whole install: the plugin's SessionStart hook builds this server's
+> environment in the background on first use, and the server comes up in the next
+> session. Everything below is the manual route, for non-Claude MCP clients or
+> development.
 
 ## Prerequisites
 
@@ -22,11 +35,12 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Or use the repo-level installer (installs all three MCPs; requires Python 3.12):
+Or let this plugin's own installer do it (requires Python 3.12), which is what
+the SessionStart hook runs:
 
 ```powershell
-cd ..
-python install.py
+python install.py              # builds into this plugin's Claude Code data dir
+python install.py --in-repo    # or build .venv here, for local development
 ```
 
 ## Configure

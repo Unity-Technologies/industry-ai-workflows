@@ -28,8 +28,8 @@ load_dotenv(dotenv_path=os.path.join(_SCRIPT_DIR, ".env"))
 from mcp.server.mcpserver import MCPServer
 
 from pa_utils import pa_init, pa_utils
-from shared.client_identity import ClientIdentityExtension
-from shared.unity_auth import vpc as _vpc
+from pa_utils.client_identity import ClientIdentityExtension
+from pa_utils.unity_auth import vpc as _vpc
 
 # The browser PKCE flow is deferred to the unity_login tool so the server can
 # boot cleanly under marketplace install (no terminal, no browser pop-up at

@@ -1,0 +1,53 @@
+{
+  "name": "upa-mcp",
+  "displayName": "Unity Pipeline Automation",
+  "version": "0.7.2",
+  "description": "Author, trigger and monitor Unity Pipeline Automation pipelines — pipeline JSON and versions, jobs, step approval, logs and app/action discovery.",
+  "author": {
+    "name": "Unity Technologies",
+    "url": "https://github.com/Unity-Technologies"
+  },
+  "homepage": "https://github.com/Unity-Technologies/industry-ai-workflows",
+  "repository": "https://github.com/Unity-Technologies/industry-ai-workflows",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "keywords": [
+    "unity",
+    "pipeline-automation",
+    "unity-cloud",
+    "ci",
+    "automation"
+  ],
+  "mcpServers": "./mcp-servers.json",
+  "userConfig": {
+    "UNITY_VPC_FQDN": {
+      "type": "string",
+      "title": "Private cloud (VPC) host",
+      "description": "Hostname of your Unity private cloud deployment (e.g. private-cloud.example.com). Leave blank for standard public Unity Cloud. When set, Pipeline Automation talks to your deployment and sign-in uses its identity service instead of Unity ID. IMPORTANT: if you also use the Unity Asset Manager plugin, set the SAME value there. The two share one sign-in, and a token minted for one deployment is refused by the other — a mismatch shows up as a permanent 'not logged in'.",
+      "default": ""
+    },
+    "UNITY_VPC_PATH_PREFIX": {
+      "type": "string",
+      "title": "Private cloud path prefix",
+      "description": "Path prefix in front of the service paths on your private cloud ingress — commonly 'backend' (giving https://<host>/backend/assets/v1/...). Leave blank if the services are served at the host root.",
+      "default": ""
+    },
+    "UNITY_VPC_OPENID_CONFIG_URL": {
+      "type": "string",
+      "title": "Private cloud OpenID configuration URL",
+      "description": "Optional override for the deployment's OpenID Connect discovery URL. Leave blank to use the standard location (https://<host>/auth/realms/unity/.well-known/openid-configuration).",
+      "default": ""
+    },
+    "UNITY_VPC_CLIENT_ID": {
+      "type": "string",
+      "title": "Private cloud OAuth client id",
+      "description": "Public OAuth client used for the browser sign-in on your private cloud. Defaults to 'dashboard'.",
+      "default": "dashboard"
+    },
+    "UNITY_VPC_AUTOMATION_PATH": {
+      "type": "string",
+      "title": "Private cloud Pipeline Automation service path",
+      "description": "Service path for Pipeline Automation on your private cloud, relative to the host and prefix. Leave blank to auto-detect: 'api/automation/v1' is tried first (newer private-cloud bundles), then 'api/automation/v1alpha1' (older bundles). Set explicitly only if your deployment serves it elsewhere.",
+      "default": ""
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "pipeline_automation": {
+      "command": "${CLAUDE_PLUGIN_DATA}/venvs/PA/Scripts/python.exe",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/pa_mcp_server.py"
+      ],
+      "env": {
+        "UNITY_VPC_FQDN": "${user_config.UNITY_VPC_FQDN}",
+        "UNITY_VPC_PATH_PREFIX": "${user_config.UNITY_VPC_PATH_PREFIX}",
+        "UNITY_VPC_OPENID_CONFIG_URL": "${user_config.UNITY_VPC_OPENID_CONFIG_URL}",
+        "UNITY_VPC_CLIENT_ID": "${user_config.UNITY_VPC_CLIENT_ID}",
+        "UNITY_VPC_AUTOMATION_PATH": "${user_config.UNITY_VPC_AUTOMATION_PATH}"
+      }
+    }
+  }
+}

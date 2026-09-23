@@ -27,9 +27,9 @@ load_dotenv()  # load .env before any auth init resolves env vars
 from mcp.server.mcpserver import MCPServer
 
 from am_utils import am_init, am_rest, dependency_vocab
-from shared.client_identity import ClientIdentityExtension
-from shared.local_paths import assert_safe_local_path
-from shared.unity_auth import vpc as _vpc
+from am_utils.client_identity import ClientIdentityExtension
+from am_utils.local_paths import assert_safe_local_path
+from am_utils.unity_auth import vpc as _vpc
 
 # The browser PKCE flow is deferred to the unity_login tool so the server can
 # start cleanly under marketplace install (no terminal to prompt at).

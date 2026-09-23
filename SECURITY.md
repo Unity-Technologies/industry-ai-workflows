@@ -15,7 +15,8 @@ Please include:
 
 - the affected component (Asset Manager, Asset Transformer, or Pipeline
   Automation MCP server, or the plugin bootstrap)
-- the version, from `.claude-plugin/plugin.json`
+- which plugin, and its version — from that plugin's own
+  `.claude-plugin/plugin.json` (they version independently)
 - what an attacker can achieve, and the steps to reproduce it
 
 ## What runs where
@@ -46,7 +47,11 @@ service:
 
 ## Trust boundary
 
-The three servers do not sit behind the same boundary, and that difference is
+Each plugin installs separately, so this boundary is now structural rather
+than a caveat: a machine that never installs the Asset Transformer plugin never
+has an arbitrary-code-execution tool registered at all.
+
+The three plugins do not sit behind the same boundary, and that difference is
 what decides whether something is a finding:
 
 | | Asset Transformer | Asset Manager / Pipeline Automation |
@@ -72,7 +77,8 @@ Two things are still worth closing there, and are:
   *is* a new capability, not a restatement of an existing one. Credential
   stores and credential-shaped filenames are refused as upload sources.
 
-Beyond that, the same accident protection applies in all three: an agent that
+Beyond that, the same accident protection applies in both plugins that touch
+the filesystem: an agent that
 mistypes an export path onto a shell rc file breaks a machine with no attacker
 involved, and that is the common case.
 
@@ -84,7 +90,8 @@ involved, and that is the common case.
   writing to an auto-executed location, exfiltrating local files through the
   cloud APIs, or reaching `run_python` from a network listener.
 - Token cache handling, the OAuth flow, and the signed-URL transfer paths.
-- The install path: the `SessionStart` hook, `bootstrap.py`, and `install.py`.
+- The install path: each plugin's `SessionStart` hook, `bootstrap.py`, and
+  `install.py`.
 
 ### What is not
 
@@ -104,7 +111,12 @@ involved, and that is the common case.
 
 All default to off or permissive, because the defaults are tuned for one
 developer on their own machine. On a shared host, a build agent, or CI, set
-these:
+these — as environment variables, which is how an operator configures a fleet.
+
+Two of them, `UAP_MCP_ALLOWED_ROOTS` and `AT_DISABLE_RUN_PYTHON`, are also
+offered in the plugins' own settings (`/plugin configure`), because an
+individual may reasonably want them on their own machine. The rest are
+environment-only: they are operator controls, not per-user preferences.
 
 | Variable | Effect |
 |---|---|
@@ -127,7 +139,8 @@ a substituted artifact would otherwise run as you with nothing on screen.
 The pxz SDK is the exception: Unity publishes a wheel per platform and platform
 releases lag each other, so a checked-in hash set would be wrong for two of the
 three platforms at any given time. Its install is instead recorded — the
-resolved wheel URL and SHA256 are printed by `install.py` and land in
+resolved wheel URL and SHA256 are printed by the Asset Transformer plugin's
+`install.py` and land in
 `bootstrap.log`.
 
 If you are reporting a vulnerability in a third-party package rather than in

@@ -1,17 +1,51 @@
 {
   "$schema": "https://code.claude.com/schemas/marketplace.json",
-  "name": "unity-asset-pipeline-marketplace",
-  "description": "Unity's Asset Manager, Asset Transformer, and Pipeline Automation MCP servers and authoring skills for Claude Code.",
+  "name": "industry-ai-workflows",
+  "version": "0.7.2",
+  "description": "Claude Code plugins for industry production workflows — Unity asset management, CAD preparation and cloud pipeline automation.",
   "owner": {
     "name": "Unity Technologies"
   },
   "plugins": [
     {
-      "name": "uap-mcp",
-      "source": "./",
-      "description": "Unity Asset Manager, Asset Transformer, and Pipeline Automation MCP servers + skills.",
+      "name": "uam-mcp",
+      "source": "./Asset_Manager_MCP",
+      "description": "Publish, version and organize assets in Unity Asset Manager — assets and versions, file upload and download, metadata, references, collections and projects.",
       "category": "unity",
-      "tags": ["unity", "asset-manager", "asset-transformer", "pipeline-automation", "cad", "3d"]
+      "tags": [
+        "unity",
+        "asset-manager",
+        "unity-cloud",
+        "dam",
+        "3d"
+      ]
+    },
+    {
+      "name": "uat-mcp",
+      "source": "./Asset_Transformer_MCP",
+      "description": "Prepare and optimise CAD data locally with the Unity Asset Transformer (pxz) SDK — import, repair, tessellate, decimate, bake, render and export. Requires a Pixyz license seat.",
+      "category": "unity",
+      "tags": [
+        "unity",
+        "asset-transformer",
+        "pixyz",
+        "cad",
+        "3d",
+        "optimisation"
+      ]
+    },
+    {
+      "name": "upa-mcp",
+      "source": "./Pipeline_Automation_MCP",
+      "description": "Author, trigger and monitor Unity Pipeline Automation pipelines — pipeline JSON and versions, jobs, step approval, logs and app/action discovery.",
+      "category": "unity",
+      "tags": [
+        "unity",
+        "pipeline-automation",
+        "unity-cloud",
+        "ci",
+        "automation"
+      ]
     }
   ]
 }
