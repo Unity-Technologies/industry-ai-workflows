@@ -1,11 +1,11 @@
 """
-Runtime identity for the Unity Asset Pipeline MCP servers
-========================================================
+Runtime identity for the Unity Pipeline Automation MCP server
+=============================================================
 
 Single source of truth for "who is this client" at runtime: reads the plugin
 version from .claude-plugin/plugin.json (the same manifest the build tools
 use) and derives the two attribution headers sent on every Unity-bound HTTP
-request — X-Unity-Cloud-Api-Source ("uap_mcp@<version>", Unity's
+request — X-Unity-Cloud-Api-Source ("upa_mcp@<version>", Unity's
 "[source]@[version]" analytics-headers convention) and User-Agent — so API
 traffic is attributable to this tool in Unity's server-side logs instead of
 showing up as anonymous python-requests.
@@ -41,11 +41,16 @@ from pathlib import Path
 # .claude-plugin/plugin.json. Each plugin reports ITS OWN version.
 #
 # Getting this wrong is silent: plugin_version() catches everything and returns
-# "unknown", so the attribution headers would degrade to uap_mcp@unknown with
+# "unknown", so the attribution headers would degrade to upa_mcp@unknown with
 # nothing failing. tests/test_user_agent.py pins it against the real manifest.
 MANIFEST_PATH = Path(__file__).resolve().parents[1] / ".claude-plugin" / "plugin.json"
 
-PRODUCT = "UAP_MCP"
+# Per plugin, not per marketplace: Asset Manager and Pipeline Automation make
+# some of the same calls (token refresh, OIDC discovery), so a shared name
+# would leave that traffic unattributable to either. Both sent "UAP_MCP" /
+# "uap_mcp" through 0.7.2. ENV_USER_AGENT keeps the shared UAP_ prefix: it is
+# user-facing config, like UAP_MCP_HOME.
+PRODUCT = "UPA_MCP"
 ENV_USER_AGENT = "UAP_MCP_USER_AGENT"
 
 # Unity's cross-service attribution convention: the gateway logs capture
@@ -53,7 +58,7 @@ ENV_USER_AGENT = "UAP_MCP_USER_AGENT"
 # dashboard sends its own value the same way). The value must follow Unity's
 # "[source]@[version]" format — see api_source().
 API_SOURCE_HEADER = "X-Unity-Cloud-Api-Source"
-API_SOURCE = "uap_mcp"
+API_SOURCE = "upa_mcp"
 
 _VERSION_RE = re.compile(r"^[0-9A-Za-z._-]{1,32}$")
 _MAX_UA_LENGTH = 200
@@ -118,7 +123,7 @@ def agent() -> str:
 def user_agent() -> str | None:
     """The User-Agent value to send, or None to send no header.
 
-    Unset env -> computed "UAP_MCP/<version> (<agent>; <OS>)"; env set
+    Unset env -> computed "UPA_MCP/<version> (<agent>; <OS>)"; env set
     non-blank -> that value (sanitized); env set blank -> None.
     """
     override = os.environ.get(ENV_USER_AGENT)
@@ -133,16 +138,16 @@ def user_agent() -> str | None:
 
 
 def api_source() -> str:
-    """The api-source header value, "uap_mcp@<version>" — Unity's
+    """The api-source header value, "upa_mcp@<version>" — Unity's
     "[source]@[version]" analytics-headers format (a broken manifest yields
-    "uap_mcp@unknown", matching the User-Agent fallback)."""
+    "upa_mcp@unknown", matching the User-Agent fallback)."""
     return f"{API_SOURCE}@{plugin_version()}"
 
 
 def attribution_headers() -> dict[str, str]:
     """The identifying headers for Unity-bound requests, as a one-line
     additive merge at every call site: the Unity gateway's api-source header
-    ("uap_mcp@<version>"; captured by the gateway logs for attribution) plus
+    ("upa_mcp@<version>"; captured by the gateway logs for attribution) plus
     the User-Agent, when not suppressed via UAP_MCP_USER_AGENT."""
     headers = {API_SOURCE_HEADER: api_source()}
     ua = user_agent()

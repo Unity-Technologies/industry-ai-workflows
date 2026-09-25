@@ -371,10 +371,11 @@ their own ids, which are used as supplied).
 
 The only identifying information these plugins add to anything is two HTTP
 headers on requests the servers already make to Unity Cloud:
-`X-Unity-Cloud-Api-Source: uap_mcp@<version>` (Unity's standard
-`[source]@[version]` convention for naming the tool behind an API call, e.g.
-`uap_mcp@0.7.2`) and the standard `User-Agent` header, e.g.
-`UAP_MCP/0.7.2 (claude-code; Windows)` — tool name and version, the agent
+`X-Unity-Cloud-Api-Source: <source>@<version>` (Unity's standard
+`[source]@[version]` convention for naming the tool behind an API call:
+`uam_mcp@<version>` from Asset Manager, `upa_mcp@<version>` from Pipeline
+Automation) and the standard `User-Agent` header, e.g.
+`UAM_MCP/0.7.3 (claude-code; Windows)` — tool name and version, the agent
 driving it (the MCP client name your editor reports, e.g. Claude Code or
 Copilot), and the OS family, so Unity can attribute API traffic to this
 tool. Each plugin reports its own version, so Asset Manager and Pipeline
