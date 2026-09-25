@@ -1,7 +1,7 @@
 {
   "name": "upa-mcp",
   "displayName": "Unity Pipeline Automation",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Author, trigger and monitor Unity Pipeline Automation pipelines — pipeline JSON and versions, jobs, step approval, logs and app/action discovery.",
   "author": {
     "name": "Unity Technologies",

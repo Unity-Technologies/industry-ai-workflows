@@ -1,7 +1,7 @@
 {
   "name": "uam-mcp",
   "displayName": "Unity Asset Manager",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Publish, version and organize assets in Unity Asset Manager — assets and versions, file upload and download, metadata, references, collections and projects.",
   "author": {
     "name": "Unity Technologies",

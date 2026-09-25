@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.3 — 2026-09-25
+
+Asset Manager (`uam-mcp`) and Pipeline Automation (`upa-mcp`) move to 0.7.3.
+Asset Transformer (`uat-mcp`) has no changes and stays at 0.7.2, so
+`/plugin update` does not offer it.
+
+### Changed
+
+- **Per-plugin attribution.** Asset Manager now sends
+  `X-Unity-Cloud-Api-Source: uam_mcp@<version>` and `User-Agent: UAM_MCP/...`;
+  Pipeline Automation sends `upa_mcp@<version>` and `UPA_MCP/...`. Both sent
+  `uap_mcp` / `UAP_MCP` through 0.7.2, which left the calls they share (token
+  refresh, OIDC discovery) unattributable to either plugin. Gateway queries
+  should match all three values until older installs have updated. The
+  `UAP_MCP_USER_AGENT` override, `UAP_MCP_HOME` and the shared `~/.uap_mcp`
+  token cache are unchanged, so nobody is signed out.
+
 ## 0.7.2 — 2026-09-23
 
 First release of **Industry AI Workflows**, a Claude Code plugin marketplace for
