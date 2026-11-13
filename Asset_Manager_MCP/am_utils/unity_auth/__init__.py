@@ -29,7 +29,7 @@ def auth_status_message() -> str | None:
     tool should return in place of running."""
     if not pkce_auth.is_logged_in():
         return (
-            "Not logged in to Unity Cloud. "
+            f"Not logged in to {pkce_auth.deployment_label()}. "
             "Call the `unity_login` tool to authenticate — a browser window will open "
             "so you can sign in with your Unity account."
         )

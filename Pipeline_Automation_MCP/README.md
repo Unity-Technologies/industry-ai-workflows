@@ -123,6 +123,7 @@ Identical in capability to the organisation-level tools but scoped to a specific
 | `get_job` | Get full details of a job including per-step status, inputs, outputs, and timing. |
 | `get_job_stats` | Get running job count, queued job count, and the concurrency limit for the organisation. |
 | `terminate_job` | Cancel a running or queued job. |
+| `stop_job` | Stop a job via the API's separate `/stop` route. |
 | `resume_job` | Resume a suspended job. |
 | `approve_job_step` | Approve or reject a suspended step in a job. Supply `approved` (bool) and an optional `comment`. |
 
@@ -135,8 +136,22 @@ Identical in capability to the organisation-level tools but scoped to a specific
 | `list_project_jobs` | List pipeline jobs for a specific project with the same filtering options as `list_jobs`. |
 | `get_project_job` | Get full details of a project job. |
 | `terminate_project_job` | Cancel a running or queued project job. |
+| `stop_project_job` | Stop a project job via the `/stop` route. |
 | `resume_project_job` | Resume a suspended project job. |
 | `approve_project_job_step` | Approve or reject a suspended step in a project job. |
+
+---
+
+### Project Service Worker Tools
+
+Project-scoped only (no organisation-level routes exist) and require the Automation Admin role.
+
+| Tool | Description |
+|---|---|
+| `start_worker` | Start a Project Service worker in a namespace (queues a worker job). |
+| `stop_worker` | Stop a worker by its job id. |
+| `stop_project_service` | Stop the Project Service instance in a namespace, including its workers. |
+| `send_project_service_command` | Send `command:<name>;arg:<value>` commands to a running Project Service (marked Temporary in the API). |
 
 ---
 

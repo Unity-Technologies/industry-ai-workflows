@@ -130,6 +130,8 @@ Replace `C:\\path\\to\\Asset_Transformer_MCP` with the actual path on your machi
 
 - CAD import and export (`import_file`, `export_scene`)
 - Repair/tessellation and optimization (`prepare_cad`, `optimise_cad`, `run_pipeline`)
+- Triangle budgets and hidden-geometry removal (`remove_hidden_geometry`, `decimate_to_budget`, `decimate_target` with `triangle_count`)
+- Mesh repair, normals/UVs, materials and instancing (`cleanup_mesh`, `fix_normals_uv`, `list_materials`, `assign_material`, `instance_similar_parts`)
 - Scene queries and editing (`get_scene_info`, `get_children`, `delete_occurrences`, `merge_occurrences`, `set_occurrence_visibility`)
 - Search and filtering (`find_occurrences_by_name`, `find_occurrences_by_property`, `find_occurrences_by_size`, `batch_delete_by_query`)
 - Visual outputs (`take_screenshot`, `take_screenshot_set`, `render_turntable_video`)
@@ -141,9 +143,11 @@ Replace `C:\\path\\to\\Asset_Transformer_MCP` with the actual path on your machi
 
 - `Scene`: `get_scene_info`, `get_children`, `get_occurrence_name`, `delete_occurrences`, `clear_scene`
 - `I/O`: `list_cad_files`, `import_file`, `export_scene`
-- `Prepare/Optimize`: `prepare_cad`, `optimise_cad`, `decimate_target`, `generate_lods`, `run_pipeline`
+- `Prepare/Optimize`: `prepare_cad`, `optimise_cad`, `remove_hidden_geometry`, `decimate_target`, `decimate_to_budget`, `generate_lods`, `instance_similar_parts`, `run_pipeline`
+- `Repair`: `cleanup_mesh`, `fix_normals_uv`
+- `Materials`: `list_materials`, `assign_material`
 - `Query`: `find_occurrences_by_name`, `find_occurrences_by_property`, `find_occurrences_by_size`, `get_occurrence_info`
-- `Edit`: `batch_delete_by_query`, `set_occurrence_visibility`, `merge_occurrences`
+- `Edit`: `batch_delete_by_query`, `set_occurrence_visibility`, `merge_occurrences` (`by_material=True` keeps one part per material)
 - `Render/Bake`: `take_screenshot`, `take_screenshot_set`, `render_turntable_video`, `bake_ambient_occlusion`
 - `Stats/Export`: `polygon_count`, `get_aabb`, `get_scene_statistics`, `export_hierarchy_json`
 - `License`: `check_license`, `release_license`
@@ -153,9 +157,10 @@ Replace `C:\\path\\to\\Asset_Transformer_MCP` with the actual path on your machi
 
 1. `list_cad_files` to select a source model.
 2. `run_pipeline` to import + prepare + optimize in one step.
-3. `take_screenshot_set` for visual QA.
-4. `get_scene_statistics` to verify triangle/vertex reduction.
-5. `export_scene` to target format (`.glb`, `.fbx`, `.obj`, `.pxz`, `.step`).
+3. For a fixed triangle budget (e.g. a web viewer): `remove_hidden_geometry`, then `decimate_to_budget`, then `fix_normals_uv`.
+4. `take_screenshot_set` for visual QA.
+5. `get_scene_statistics` to verify triangle/vertex reduction.
+6. `export_scene` to target format (`.glb`, `.fbx`, `.obj`, `.pxz`, `.step`).
 
 ## Notes
 

@@ -1101,7 +1101,37 @@ def terminate_job(job_id: str, org_id: str = "") -> str:
 
 @mcp.tool()
 @_require_auth
-def resume_job(job_id: str, step_id: str, org_id: str = "", parameters: dict | None = None) -> str:
+def stop_job(job_id: str, org_id: str = "") -> str:
+    """Stop an organisation-level job (the API's /stop route, distinct from terminate_job).
+
+    Use terminate_job to cancel a job outright; stop is the separate lifecycle
+    action the API exposes for jobs that support stopping (e.g. long-running
+    service jobs). Returns the job's resulting status; 409 when its current
+    status cannot be stopped.
+
+    Args:
+        job_id:  The job unique identifier (UUID).
+        org_id:  Organisation ID (falls back to the session default; see set_default_organization).
+    """
+    org = _org(org_id)
+    if not org:
+        return "Error: no organization selected. Call list_organizations, ask the user to pick one, then set_default_organization (or pass org_id)."
+    try:
+        result = pa_utils.stop_job(pa_init.get_session(), org, job_id)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error stopping job '{job_id}': {e}"
+
+
+@mcp.tool()
+@_require_auth
+def resume_job(
+    job_id: str,
+    step_id: str,
+    org_id: str = "",
+    parameters: dict | None = None,
+    job_pipeline_uid: str = "",
+) -> str:
     """Resume a suspended organisation-level job at its suspended step.
 
     Args:
@@ -1111,12 +1141,18 @@ def resume_job(job_id: str, step_id: str, org_id: str = "", parameters: dict | N
         org_id:     Organisation ID (falls back to the session default; see set_default_organization).
         parameters: Optional values for a suspend step that waits for user-supplied
                     input — passed through as the resume request's parameters map.
+        job_pipeline_uid: Optional pipeline-reference invocation id. Needed only
+                    when the step id appears in more than one referenced-pipeline
+                    run of the job (the API answers 409 otherwise).
     """
     org = _org(org_id)
     if not org:
         return "Error: no organization selected. Call list_organizations, ask the user to pick one, then set_default_organization (or pass org_id)."
     try:
-        result = pa_utils.resume_job(pa_init.get_session(), org, job_id, step_id, parameters=parameters)
+        result = pa_utils.resume_job(
+            pa_init.get_session(), org, job_id, step_id,
+            parameters=parameters, job_pipeline_uid=job_pipeline_uid,
+        )
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error resuming job '{job_id}' step '{step_id}': {e}"
@@ -1130,6 +1166,7 @@ def approve_job_step(
     approved: bool,
     org_id: str = "",
     comment: str = "",
+    job_pipeline_uid: str = "",
 ) -> str:
     """Approve or reject a suspended step in an organisation-level job.
 
@@ -1139,12 +1176,18 @@ def approve_job_step(
         approved:  True to approve, False to reject.
         org_id:    Organisation ID (falls back to the session default; see set_default_organization).
         comment:   Optional comment explaining the approval or rejection.
+        job_pipeline_uid: Optional pipeline-reference invocation id. Needed only
+                    when the step id appears in more than one referenced-pipeline
+                    run of the job (the API answers 409 otherwise).
     """
     org = _org(org_id)
     if not org:
         return "Error: no organization selected. Call list_organizations, ask the user to pick one, then set_default_organization (or pass org_id)."
     try:
-        result = pa_utils.approve_job_step(pa_init.get_session(), org, job_id, step_id, approved, comment=comment)
+        result = pa_utils.approve_job_step(
+            pa_init.get_session(), org, job_id, step_id, approved,
+            comment=comment, job_pipeline_uid=job_pipeline_uid,
+        )
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error approving step '{step_id}' in job '{job_id}': {e}"
@@ -1259,7 +1302,37 @@ def terminate_project_job(job_id: str, org_id: str = "", project_id: str = "") -
 
 @mcp.tool()
 @_require_auth
-def resume_project_job(job_id: str, step_id: str, org_id: str = "", project_id: str = "", parameters: dict | None = None) -> str:
+def stop_project_job(job_id: str, org_id: str = "", project_id: str = "") -> str:
+    """Stop a project job (the API's /stop route, distinct from terminate_project_job).
+
+    Args:
+        job_id:     The job unique identifier (UUID).
+        org_id:     Organisation ID (falls back to the session default; see set_default_organization).
+        project_id: Project ID (falls back to the session default; see set_default_project).
+    """
+    org = _org(org_id)
+    proj = _proj(project_id)
+    if not org:
+        return "Error: no organization selected. Call list_organizations, ask the user to pick one, then set_default_organization (or pass org_id)."
+    if not proj:
+        return "Error: no project selected. Ask the user which project to use, then set_default_project (or pass project_id)."
+    try:
+        result = pa_utils.stop_project_job(pa_init.get_session(), org, proj, job_id)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error stopping project job '{job_id}': {e}"
+
+
+@mcp.tool()
+@_require_auth
+def resume_project_job(
+    job_id: str,
+    step_id: str,
+    org_id: str = "",
+    project_id: str = "",
+    parameters: dict | None = None,
+    job_pipeline_uid: str = "",
+) -> str:
     """Resume a suspended project job at its suspended step.
 
     Args:
@@ -1270,6 +1343,9 @@ def resume_project_job(job_id: str, step_id: str, org_id: str = "", project_id: 
         project_id: Project ID (falls back to the session default; see set_default_project).
         parameters: Optional values for a suspend step that waits for user-supplied
                     input — passed through as the resume request's parameters map.
+        job_pipeline_uid: Optional pipeline-reference invocation id. Needed only
+                    when the step id appears in more than one referenced-pipeline
+                    run of the job (the API answers 409 otherwise).
     """
     org = _org(org_id)
     proj = _proj(project_id)
@@ -1278,7 +1354,10 @@ def resume_project_job(job_id: str, step_id: str, org_id: str = "", project_id: 
     if not proj:
         return "Error: no project selected. Ask the user which project to use, then set_default_project (or pass project_id)."
     try:
-        result = pa_utils.resume_project_job(pa_init.get_session(), org, proj, job_id, step_id, parameters=parameters)
+        result = pa_utils.resume_project_job(
+            pa_init.get_session(), org, proj, job_id, step_id,
+            parameters=parameters, job_pipeline_uid=job_pipeline_uid,
+        )
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error resuming project job '{job_id}' step '{step_id}': {e}"
@@ -1293,6 +1372,7 @@ def approve_project_job_step(
     org_id: str = "",
     project_id: str = "",
     comment: str = "",
+    job_pipeline_uid: str = "",
 ) -> str:
     """Approve or reject a suspended step in a project job.
 
@@ -1303,6 +1383,9 @@ def approve_project_job_step(
         org_id:     Organisation ID (falls back to the session default; see set_default_organization).
         project_id: Project ID (falls back to the session default; see set_default_project).
         comment:    Optional comment explaining the approval or rejection.
+        job_pipeline_uid: Optional pipeline-reference invocation id. Needed only
+                    when the step id appears in more than one referenced-pipeline
+                    run of the job (the API answers 409 otherwise).
     """
     org = _org(org_id)
     proj = _proj(project_id)
@@ -1312,7 +1395,8 @@ def approve_project_job_step(
         return "Error: no project selected. Ask the user which project to use, then set_default_project (or pass project_id)."
     try:
         result = pa_utils.approve_project_job_step(
-            pa_init.get_session(), org, proj, job_id, step_id, approved, comment=comment
+            pa_init.get_session(), org, proj, job_id, step_id, approved,
+            comment=comment, job_pipeline_uid=job_pipeline_uid,
         )
         return json.dumps(result, indent=2)
     except Exception as e:
@@ -1325,19 +1409,32 @@ def approve_project_job_step(
 
 @mcp.tool()
 @_require_auth
-def get_job_step_logs(job_id: str, step_id: str, org_id: str = "") -> str:
+def get_job_step_logs(
+    job_id: str,
+    step_id: str,
+    org_id: str = "",
+    job_pipeline_uid: str = "",
+    start_line: int | None = None,
+) -> str:
     """Get logs for a specific step in an organisation-level pipeline job.
 
     Args:
         job_id:   The job unique identifier (UUID).
         step_id:  The step unique identifier.
         org_id:   Organisation ID (falls back to the session default; see set_default_organization).
+        job_pipeline_uid: Optional pipeline-reference invocation id. Needed only
+                    when the step id appears in more than one referenced-pipeline
+                    run of the job (the API answers 409 otherwise).
+        start_line: Optional line number to start from (skip lines already read).
     """
     org = _org(org_id)
     if not org:
         return "Error: no organization selected. Call list_organizations, ask the user to pick one, then set_default_organization (or pass org_id)."
     try:
-        result = pa_utils.get_job_step_logs(pa_init.get_session(), org, job_id, step_id)
+        result = pa_utils.get_job_step_logs(
+            pa_init.get_session(), org, job_id, step_id,
+            job_pipeline_uid=job_pipeline_uid, start_line=start_line,
+        )
         return json.dumps(result, indent=2) if isinstance(result, (dict, list)) else str(result)
     except Exception as e:
         return f"Error getting logs for step '{step_id}' in job '{job_id}': {e}"
@@ -1350,6 +1447,8 @@ def get_project_job_step_logs(
     step_id: str,
     org_id: str = "",
     project_id: str = "",
+    job_pipeline_uid: str = "",
+    start_line: int | None = None,
 ) -> str:
     """Get logs for a specific step in a project pipeline job.
 
@@ -1358,6 +1457,10 @@ def get_project_job_step_logs(
         step_id:    The step unique identifier.
         org_id:     Organisation ID (falls back to the session default; see set_default_organization).
         project_id: Project ID (falls back to the session default; see set_default_project).
+        job_pipeline_uid: Optional pipeline-reference invocation id. Needed only
+                    when the step id appears in more than one referenced-pipeline
+                    run of the job (the API answers 409 otherwise).
+        start_line: Optional line number to start from (skip lines already read).
     """
     org = _org(org_id)
     proj = _proj(project_id)
@@ -1366,7 +1469,10 @@ def get_project_job_step_logs(
     if not proj:
         return "Error: no project selected. Ask the user which project to use, then set_default_project (or pass project_id)."
     try:
-        result = pa_utils.get_project_job_step_logs(pa_init.get_session(), org, proj, job_id, step_id)
+        result = pa_utils.get_project_job_step_logs(
+            pa_init.get_session(), org, proj, job_id, step_id,
+            job_pipeline_uid=job_pipeline_uid, start_line=start_line,
+        )
         return json.dumps(result, indent=2) if isinstance(result, (dict, list)) else str(result)
     except Exception as e:
         return f"Error getting logs for step '{step_id}' in project job '{job_id}': {e}"
@@ -1691,6 +1797,160 @@ def get_pipeline_template(
 
 
 # ---------------------------------------------------------------------------
+# Project Service worker tools
+# Project-scoped only: the API has no org-level twin for these routes. All
+# require the Automation Admin role on the project.
+# ---------------------------------------------------------------------------
+
+def _org_proj_or_error(org_id: str, project_id: str) -> tuple[str, str, str | None]:
+    org = _org(org_id)
+    proj = _proj(project_id)
+    if not org:
+        return org, proj, "Error: no organization selected. Call list_organizations, ask the user to pick one, then set_default_organization (or pass org_id)."
+    if not proj:
+        return org, proj, "Error: no project selected. Ask the user which project to use, then set_default_project (or pass project_id)."
+    return org, proj, None
+
+
+@mcp.tool()
+@_require_auth
+def start_worker(
+    project_service_namespace: str,
+    worker_pipeline_id: str = "",
+    worker_pipeline_version: str = "",
+    editor_version: str = "",
+    editor_sub_version: str = "",
+    target_platform: str = "",
+    worker_id: str = "",
+    api_endpoint: str = "",
+    otto_version: str = "",
+    resource_config_name: str = "",
+    org_id: str = "",
+    project_id: str = "",
+) -> str:
+    """Start a Project Service worker in a project (queues a worker job; HTTP 202).
+
+    Requires the Automation Admin role. Returns 409 while another start/stop is
+    in progress for the namespace and 429 when the project's worker cap is hit.
+    Find the resulting job with list_project_jobs, stop it with stop_worker.
+
+    Args:
+        project_service_namespace: Namespace (RFC 1123 label, max 60 chars; deployed as "ps-<namespace>").
+        worker_pipeline_id:      Optional worker pipeline id (GUID).
+        worker_pipeline_version: Optional worker pipeline version.
+        editor_version:          Optional Unity Editor version, e.g. "6000.0.40f1".
+        editor_sub_version:      Optional Editor sub-version.
+        target_platform:         Optional build target platform.
+        worker_id:               Optional worker identifier.
+        api_endpoint:            Optional API endpoint (ws:// or wss://).
+        otto_version:            Optional Otto version.
+        resource_config_name:    Optional resource size: "Small", "Medium" or "Large".
+        org_id:                  Organisation ID (falls back to the session default).
+        project_id:              Project ID (falls back to the session default).
+    """
+    org, proj, err = _org_proj_or_error(org_id, project_id)
+    if err:
+        return err
+    optional = {
+        "workerPipelineId": worker_pipeline_id,
+        "workerPipelineVersion": worker_pipeline_version,
+        "editorVersion": editor_version,
+        "editorSubVersion": editor_sub_version,
+        "targetPlatform": target_platform,
+        "workerId": worker_id,
+        "apiEndpoint": api_endpoint,
+        "ottoVersion": otto_version,
+        "resourceConfigName": resource_config_name,
+    }
+    body = {"projectServiceNamespace": project_service_namespace}
+    body.update({k: v for k, v in optional.items() if v})
+    try:
+        result = pa_utils.start_worker(pa_init.get_session(), org, proj, body)
+        if result is None:
+            return json.dumps({"accepted": True, "namespace": project_service_namespace,
+                               "note": "Worker job queued (202). Use list_project_jobs to find it."}, indent=2)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error starting worker in namespace '{project_service_namespace}': {e}"
+
+
+@mcp.tool()
+@_require_auth
+def stop_worker(job_id: str, org_id: str = "", project_id: str = "") -> str:
+    """Stop a Project Service worker by its job id (Automation Admin role).
+
+    Args:
+        job_id:     The worker's job id (from list_project_jobs).
+        org_id:     Organisation ID (falls back to the session default).
+        project_id: Project ID (falls back to the session default).
+    """
+    org, proj, err = _org_proj_or_error(org_id, project_id)
+    if err:
+        return err
+    try:
+        result = pa_utils.stop_worker(pa_init.get_session(), org, proj, job_id)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error stopping worker job '{job_id}': {e}"
+
+
+@mcp.tool()
+@_require_auth
+def stop_project_service(namespace: str, org_id: str = "", project_id: str = "") -> str:
+    """Stop the Project Service instance in a namespace, including its workers (Automation Admin role).
+
+    Returns {jobId, jobStatus, workers}.
+
+    Args:
+        namespace:  The Project Service namespace (as passed to start_worker).
+        org_id:     Organisation ID (falls back to the session default).
+        project_id: Project ID (falls back to the session default).
+    """
+    org, proj, err = _org_proj_or_error(org_id, project_id)
+    if err:
+        return err
+    try:
+        result = pa_utils.stop_project_service(pa_init.get_session(), org, proj, namespace)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error stopping project service '{namespace}': {e}"
+
+
+@mcp.tool()
+@_require_auth
+def send_project_service_command(
+    namespace: str,
+    commands: list[str],
+    headers: dict[str, str] | None = None,
+    org_id: str = "",
+    project_id: str = "",
+) -> str:
+    """Send commands to a running Project Service (marked Temporary in the API; may change).
+
+    Each command is a string "command:<name>;arg:<value>". Known names: preview,
+    import, createworkbench, createenvironment, editorstart, job, environments,
+    workbenches, workbenchhead, projects. Returns per-command
+    {command, isSuccess, message}. Automation Admin role required.
+
+    Args:
+        namespace:  The Project Service namespace.
+        commands:   List of command strings.
+        headers:    Optional headers forwarded to the service.
+        org_id:     Organisation ID (falls back to the session default).
+        project_id: Project ID (falls back to the session default).
+    """
+    org, proj, err = _org_proj_or_error(org_id, project_id)
+    if err:
+        return err
+    try:
+        result = pa_utils.send_project_service_command(
+            pa_init.get_session(), org, proj, namespace, commands, headers)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error sending commands to project service '{namespace}': {e}"
+
+
+# ---------------------------------------------------------------------------
 # Auth tools
 # ---------------------------------------------------------------------------
 
@@ -1736,7 +1996,7 @@ def unity_auth_status() -> str:
     return json.dumps(
         {
             "ready": err is None,
-            "message": err or "Authenticated.",
+            "message": err or f"Authenticated to {pa_init.pkce_auth.deployment_label()}.",
         },
         indent=2,
     )

@@ -194,6 +194,7 @@ constraints as create). Returns the job. Not wrapped by an MCP tool.
 | Get job | `GET /organizations/{orgId}/jobs/{jobId}` | `get_job` |
 | Job stream (SSE updates) | `GET /organizations/{orgId}/jobs/{jobId}/stream` | — |
 | Terminate | `PUT /organizations/{orgId}/jobs/{jobId}/terminate` | `terminate_job` |
+| Stop | `PUT /organizations/{orgId}/jobs/{jobId}/stop` | `stop_job` |
 | Resume suspended step | `PUT /organizations/{orgId}/jobs/{jobId}/steps/{stepId}/resume` | `resume_job` |
 | Approve/reject suspended step | `PUT /organizations/{orgId}/jobs/{jobId}/steps/{stepId}/approve` | `approve_job_step` |
 | Org job stats | `GET /organizations/{orgId}/job-stats` | `get_job_stats` |
@@ -210,6 +211,9 @@ endpoint already includes project jobs).
 - `Failed` = a step failed; `Error` = the platform hit an error running the job.
 - Terminate/resume/approve return `409` when the job's current status does not
   allow that transition (e.g. terminating an already-finished job).
+- Resume/approve/step-logs also return `409` when the `stepId` matches more
+  than one job step (the same step run by several pipeline-reference
+  invocations) and no `jobPipelineUid` was passed to disambiguate.
 
 ### List jobs — query parameters
 
@@ -280,6 +284,10 @@ reads); inspect them when debugging template expressions.
   `resume_project_job` tools take both `job_id` and `step_id` (the suspended
   step's id from the job's `steps`).
 - Both return `200` with `{ "status": "<new job status>" }`.
+- Both (and the step-logs route) accept an optional `jobPipelineUid` query
+  param — MCP `job_pipeline_uid` — naming which pipeline-reference invocation
+  the step belongs to. Only needed when the step id is ambiguous (see the `409`
+  note above); the keys of the job's `jobPipelineUids` map are the valid values.
 
 ### Job stats
 
@@ -296,12 +304,14 @@ concurrency limit (jobs sit in `Queued` until a slot frees up).
 |---|---|---|
 | Step logs | `GET /organizations/{orgId}/jobs/{jobId}/steps/{stepId}/logs` | `get_job_step_logs` |
 | Step logs (live SSE) | `GET .../steps/{stepId}/logs/sse` | — |
-| Whole-job logs | `GET /organizations/{orgId}/jobs/{jobId}/logs` | — |
+| Whole-job logs | `GET /organizations/{orgId}/jobs/{jobId}/logs` | `get_job_logs` |
 
 Requires the Automation Developer role (a `403` here with an otherwise-working
 token usually means the role is missing).
 
-- Step logs return a JSON **array of strings** (one per log line).
+- Step logs return a JSON **array of strings** (one per log line). Pass
+  `startLine` (MCP `start_line`) to skip lines already read when polling a
+  running step, and `jobPipelineUid` when the step id is ambiguous.
 - Whole-job logs return `{ "stepLogs": [ { "stepId": "...", "log": "..." } ] }`.
 - `stepId` = the pipeline step id (`pipelineStepId` on the job's steps), not a
   separate runtime id.
@@ -390,6 +400,36 @@ Posting any JSON payload to the webhook route fires an event-triggered
 automation; the payload is mapped onto pipeline inputs via the app event's
 `outputParameterMapping`, and webhook signatures can be verified via the
 event's `signature` definition (e.g. HMAC-SHA256 header check).
+
+---
+
+## Project Service workers
+
+Project-scoped only: there are no org-level twins. Every route requires the
+Automation Admin role on the project.
+
+| Operation | Route | MCP tool |
+|---|---|---|
+| Start worker | `POST /organizations/{orgId}/projects/{projectId}/worker/start` | `start_worker` |
+| Stop worker | `PUT /organizations/{orgId}/projects/{projectId}/worker/{jobId}/stop` | `stop_worker` |
+| Stop Project Service | `PUT /organizations/{orgId}/projects/{projectId}/projectservice/{namespaceName}/stop` | `stop_project_service` |
+| Send command (Temporary) | `POST /organizations/{orgId}/projects/{projectId}/projectservice/send-command` | `send_project_service_command` |
+
+- Start body: `projectServiceNamespace` (required; RFC 1123 label, max 60
+  chars, deployed as `ps-<namespace>`), plus optional `workerPipelineId`,
+  `workerPipelineVersion`, `editorVersion`, `editorSubVersion`,
+  `targetPlatform`, `workerId`, `apiEndpoint` (`ws://` / `wss://`),
+  `ottoVersion`, `resourceConfigName` (`Small` / `Medium` / `Large`).
+- Start answers `202` with no body; find the worker job with
+  `list_project_jobs`. `409` while another start/stop is in progress for the
+  namespace, `429` at the project's worker cap.
+- Stop Project Service returns `{jobId, jobStatus, workers}` and cascades to
+  the namespace's workers.
+- Send-command body: `{namespace, commands, headers?}`; each command is
+  `command:<name>;arg:<value>` with names `preview`, `import`,
+  `createworkbench`, `createenvironment`, `editorstart`, `job`,
+  `environments`, `workbenches`, `workbenchhead`, `projects`. Response:
+  `{results: [{command, isSuccess, message}]}`.
 
 ---
 

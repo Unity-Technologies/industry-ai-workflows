@@ -62,7 +62,7 @@
       "id": "optimize",
       "name": "Tessellate and decimate to GLB",
       "action": {
-        "actionId": "9dadfc21-2cd6-4dff-a31e-7a64967579c9-1.2.1-Execute-custom-script---Requires-Unity-Industry",
+        "actionId": "9dadfc21-2cd6-4dff-a31e-7a64967579c9-1.3.1-Execute-custom-script---Requires-Unity-Industry",
         "inputParameters": {
           "script": "import argparse, glob, os\nimport pxz\nfrom pxz import io, algo, scene\n\ndef main():\n    p = argparse.ArgumentParser()\n    p.add_argument('--input-dir', default='/workspace/input')\n    p.add_argument('--output', default='/workspace/output/model.glb')\n    p.add_argument('--ratio', type=float, default=0.5)\n    a = p.parse_args()\n    sources = [f for ext in ('*.step','*.stp','*.jt','*.fbx') for f in glob.glob(os.path.join(a.input_dir, ext))]\n    root = io.importScene(sources[0])\n    algo.repairCAD([root], 0.1, True)\n    algo.tessellateRelativelyToAABB([root], -1, 0.0005, -1, 15.0)\n    algo.repairMesh([root], 0.1, True, False)\n    algo.decimateTarget([root], ['ratio', a.ratio])\n    os.makedirs(os.path.dirname(a.output), exist_ok=True)\n    io.exportScene(a.output, root)\n\nif __name__ == '__main__':\n    main()\n",
           "parameters": "--ratio 0.5"

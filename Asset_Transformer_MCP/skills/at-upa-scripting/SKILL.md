@@ -54,6 +54,8 @@ Notes:
 
 The AT custom script action has no Asset Manager credentials. If a workflow needs to push the resulting file back into Asset Manager, **chain an Asset Manager `Add file` (or `Create asset`) action** as a downstream step in the pipeline JSON — do not try to call AM APIs from inside the script.
 
+A converted output (the GLB, FBX or LOD your script exports from the input CAD) goes into a **new asset**: chain `Create asset` with the input asset as its `source*` fields and `referenceType: "Converted"`, then `Add file` into that new asset. Do not upload it into a custom dataset on the source asset. `pipeline-authoring` has the parameters.
+
 When advising a user whose script needs to publish output, point them at the AM action; do not fabricate AM calls inside the script body.
 
 ## Script structure
@@ -105,7 +107,7 @@ Specifically, do not invent:
 - Pipeline features that don't exist
 - AM / UPA APIs callable from inside the script
 - Object-style APIs like `scene.Node`, `scene.NodeType`, `scene.getName`, `scene.deleteNodes` — pxz uses **integer occurrence handles**, not Node objects. Real names: `scene.getOccurrenceName`, `scene.deleteOccurrences`, etc.
-- Keyword arguments on `io.exportScene` — the real signature is `exportScene(fileName: str, root: int = 0)`. Format is inferred from extension; per-format options are set via `core.setModuleProperty("io", ...)` before the export call.
+- Keyword arguments on `io.exportScene` — the real signature is `exportScene(fileName: str, root: int = 0)`. Format is inferred from extension; per-format options are set via `core.setModuleProperty("IO", ...)` (module name upper-case) before the export call.
 
 If something is uncertain or undocumented:
 - Say so explicitly

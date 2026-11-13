@@ -14,8 +14,9 @@ Why copying IDs breaks:
   you which registration you picked.
 - **Slugs differ per deployment.** The same action carries different name
   slugs: public cloud serves
-  `…-1.2.1-Execute-custom-script---Requires-Unity-Industry`, a private-cloud
-  (VPC) deployment serves `…-1.2.1-Execute-custom-script` (verified live).
+  `…-<version>-Execute-custom-script---Requires-Unity-Industry`, a private-cloud
+  (VPC) deployment served `…-1.2.1-Execute-custom-script` (verified live on
+  1.2.1; the 1.3.x slug on VPC has not been re-checked).
   A copied public-cloud ID 400s on VPC and vice versa.
 - **Versions advance.** The `<version>` embedded in the ID must be an app
   version that is Available in *that org*, and old versions get retired.
@@ -48,7 +49,7 @@ the procedure above.
 | Get asset (Asset Manager) | `ad7cbc97-36d5-46ac-99fc-89ea88025b26-1.1.2-Get-asset` |
 | Create asset (Asset Manager) | `ad7cbc97-36d5-46ac-99fc-89ea88025b26-1.1.2-Create-asset` |
 | Add file (Asset Manager) | `ad7cbc97-36d5-46ac-99fc-89ea88025b26-1.1.2-Add-file` |
-| Execute custom script (Asset Transformer) | `9dadfc21-2cd6-4dff-a31e-7a64967579c9-1.2.1-Execute-custom-script---Requires-Unity-Industry` |
+| Execute custom script (Asset Transformer) | `9dadfc21-2cd6-4dff-a31e-7a64967579c9-1.3.1-Execute-custom-script---Requires-Unity-Industry` |
 
 > **Do not use** the other Asset Transformer registration
 > (`f83a90ce-12a9-4efd-918f-fddc0f1680d3`, action
@@ -96,15 +97,23 @@ script body itself).
 
 ## Create asset
 
+A converted output belongs in a new asset created by this action, with the
+`source*` inputs set to the input asset and `referenceType: "Converted"`, not
+in a custom dataset on the source asset.
+
 | Key | Required | Description |
 |---|---|---|
 | `projectId` | Yes | Target project |
 | `assetName` | Yes | Name for the new asset |
-| `assetType` | No | e.g. `"3D Model"` |
+| `assetType` | No | Exact API spelling, e.g. `"3D Model"`, `"2D Asset"`. The action passes it straight to the API, so `"2D asset"` fails with 40203 (`Asset.PrimaryType` invalid). (The Asset Manager MCP normalises spellings; this action does not.) |
 | `assetTags` | No | **Must be an array** (e.g. `["tag1"]`). A bare string returns HTTP 400 (code 55). |
 | `collectionPath` | No | Collection to place the asset in |
+| `sourceProjectId` / `sourceAssetId` / `sourceAssetVersionId` / `sourceDatasetDescriptor` | No | The asset this one was produced from; the source gets a reference to the new asset |
+| `referenceType` | No | `Converted` (server default) or `Dependency` |
 
 **Outputs:** `assetId`, `assetVersionId`, `datasetId`, `projectId`, `assetName`.
+
+`Create asset` creates the `Source` and `Preview` datasets itself (a `ReferenceOutput` dataset may also appear), so no separate dataset step is needed: point a later `Add file` at `Preview` via `datasetDescriptor`.
 
 ## Add file
 
@@ -116,3 +125,39 @@ script body itself).
 | `datasetDescriptor` | No | Dataset to upload into |
 | `uploadDirectory` | No | Local directory whose contents are uploaded (default: all workspace files) |
 | `freezeAsset` | No | `true` to freeze the asset version after upload |
+
+## Creo View (.pvz) input — convert via Wine first
+
+pxz cannot import `.pvz` directly: the PTC reader is Windows-only. AT images
+that support it ship a Windows Pixyz under Wine, driven by one command:
+
+```python
+import subprocess
+result = subprocess.run(
+    ["python3wine", "/opt/exportcreo.py", input_pvz, output_pxz],
+    capture_output=True, check=False,
+)
+ok = result.returncode in (0, 15)  # 15 is also success; still check the file exists
+```
+
+The `.pxz` it writes then imports normally (`io.importScene`).
+
+**Use "Execute custom script" 1.3.x** (app `9dadfc21-…`, the latest Available
+version; 1.3.1 as of 2026-11). The Asset Transformer team updated its image to
+support the Wine emulator, so the conversion runs in the same script step as
+the rest of the processing: call `python3wine`, then `io.importScene` the
+`.pxz`. Wine may still log "wine32 is missing"; that warning is harmless.
+
+History, in case you meet an older pipeline (public cloud):
+
+| Runner | Result |
+|---|---|
+| "Execute custom script" 1.3.x | Supported (image updated for Wine) |
+| "Execute custom script" 1.2.1–1.2.6, SDK 2026.3.1.1 | Broken (verified 2026-10-16): exit 3 and no output; JtOpenPlugin fails (`MSVCP140_ATOMIC_WAIT.dll` not found), then `signal received: 11`. All 1.2.x versions are now Archived |
+| "Execute custom script" 1.2.0, SDK 2025.4.2.2 | Worked (exit 15, valid `.pxz`), but is now Archived |
+| "Convert PVZ file to PXZ" action (`f83a90ce-…-1.1.1-Convert-PVZ-file-to-PXZ`) | Works, but its registration is Draft-only, so a pipeline using it can never be set to Available (error code 53). No longer needed |
+
+A pipeline still pinned to a 1.2.x action id should move to the current 1.3.x
+id (rediscover it with `list_app_versions`). If in-script Wine ever fails
+again, a single `python3wine` call in a throwaway transient pipeline shows
+whether the image regressed.

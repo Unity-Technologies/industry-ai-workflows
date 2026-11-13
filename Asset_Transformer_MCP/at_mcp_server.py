@@ -44,6 +44,7 @@ import contextlib
 import functools
 import ipaddress
 import json
+import math
 import os
 import secrets
 import sys
@@ -193,7 +194,12 @@ def _init_pxz():
             pxz.initialize()
 
             try:
-                core.configureLicenseServer(host, port, True)  # FlexLM floating license
+                # FlexLM floating license. 2026.5 replaced the `flexLM: bool` parameter
+                # with a `serverType` enum; older SDKs only take the bool (True == FLEXLM).
+                server_type = getattr(core, "LicenseServerType", None)
+                core.configureLicenseServer(
+                    host, port, server_type.FLEXLM if server_type is not None else True
+                )
             except Exception as exc:
                 raise LicenseError(
                     f"Failed to configure license server {host}:{port}: {exc}"
@@ -737,13 +743,25 @@ def clear_scene() -> str:
 
 @mcp.tool()
 @_limit_concurrency
-def import_file(file_path: str, reset_scene: bool = False) -> str:
+def import_file(
+    file_path: str,
+    reset_scene: bool = False,
+    prefer_load_mesh: bool = False,
+) -> str:
     """
     Import a CAD or 3D file into the current scene.
 
     Args:
-        file_path:   Absolute path to the file to import.
-        reset_scene: If True, clear the existing scene before importing.
+        file_path:        Absolute path to the file to import.
+        reset_scene:      If True, clear the existing scene before importing.
+        prefer_load_mesh: For formats that carry both exact (BRep) geometry and
+                          a stored tessellation, load the tessellation instead
+                          of re-tessellating. Much faster on large assemblies
+                          when you do not need prepare_cad's control over
+                          tessellation quality. Sets the IO module's
+                          PreferLoadMesh property for this import only;
+                          `prefer_load_mesh_applied` reports whether the SDK
+                          accepted it.
     """
     try:
         import os
@@ -764,18 +782,32 @@ def import_file(file_path: str, reset_scene: bool = False) -> str:
                 finally:
                     pxz.core.endUndoRedoStep()
 
-        root_occurrence = pxz.io.importScene(file_path)
-        poly = pxz.scene.getPolygonCount([root_occurrence])
         snippet_lines = []
         if reset_scene:
             snippet_lines.append("scene.deleteOccurrences(scene.getChildren(scene.getRoot()))")
+
+        applied, restore = False, None
+        if prefer_load_mesh:
+            applied, restore = _set_module_property(pxz, "IO", "PreferLoadMesh", "True")
+            if applied:
+                snippet_lines.append('core.setModuleProperty("IO", "PreferLoadMesh", "True")')
+        try:
+            root_occurrence = pxz.io.importScene(file_path)
+        finally:
+            if applied and restore is not None:
+                with contextlib.suppress(Exception):
+                    pxz.core.setModuleProperty("IO", "PreferLoadMesh", restore)
+        poly = pxz.scene.getPolygonCount([root_occurrence])
         snippet_lines.append(f"root = io.importScene({file_path!r})")
+        data = {
+            "imported_occurrence": root_occurrence,
+            "polygon_count": poly,
+            "file": file_path,
+        }
+        if prefer_load_mesh:
+            data["prefer_load_mesh_applied"] = applied
         return _ok(
-            {
-                "imported_occurrence": root_occurrence,
-                "polygon_count": poly,
-                "file": file_path,
-            },
+            data,
             message=f"Imported {os.path.basename(file_path)}",
             script="\n".join(snippet_lines),
         )
@@ -783,11 +815,32 @@ def import_file(file_path: str, reset_scene: bool = False) -> str:
         return _err(exc)
 
 
+def _set_module_property(pxz, module: str, name: str, value: str) -> tuple[bool, str | None]:
+    """Best-effort module property set. Returns (applied, previous value to restore)."""
+    try:
+        previous = pxz.core.getModuleProperty(module, name)
+    except Exception:
+        previous = None
+    try:
+        pxz.core.setModuleProperty(module, name, value)
+    except Exception:
+        return False, None
+    return True, previous
+
+
 @mcp.tool()
 @_limit_concurrency
 def export_scene(output_path: str, occurrence_id: int | None = None) -> str:
     """
     Export the scene (or a specific occurrence) to a file.
+
+    Size guidance:
+    - .pxz on a heavily processed scene can be enormous (tens of GB): deleted
+      and replaced geometry is still carried in the file. To checkpoint a large
+      scene, export .fbx (or .glb), clear_scene, and re-import it, which drops
+      the dead data. Never use core.save from run_python for this.
+    - GLBs meant for a web/AR viewer should stay around 250k triangles or fewer;
+      decimate or generate_lods first.
 
     Args:
         output_path:   Absolute path including extension (e.g. .glb, .fbx, .pxz).
@@ -1166,23 +1219,66 @@ def get_aabb(occurrence_id: int | None = None) -> str:
 def decimate_target(
     ratio: float = 50.0,
     occurrence_id: int | None = None,
+    triangle_count: int | None = None,
 ) -> str:
     """
-    Decimate an occurrence to a target polygon ratio.
+    Decimate an occurrence to a target polygon ratio or an absolute triangle count.
 
     Args:
-        ratio:         Target percentage of original polygon count (5–95).
-        occurrence_id: Occurrence to decimate. Defaults to scene root.
+        ratio:          Target percentage of original polygon count (5–95).
+                        Ignored when triangle_count is given.
+        occurrence_id:  Occurrence to decimate. Defaults to scene root.
+        triangle_count: Absolute target triangle count for the whole
+                        occurrence (e.g. 250000 for a web-viewer GLB). Use
+                        decimate_to_budget instead to spread a budget across
+                        parts by size rather than uniformly.
     """
-    if not (5.0 <= ratio <= 95.0):
+    if triangle_count is not None:
+        if int(triangle_count) < 1:
+            return json.dumps(
+                {"status": "error", "message": "triangle_count must be a positive integer"}
+            )
+    elif not (5.0 <= ratio <= 95.0):
         return json.dumps(
             {"status": "error", "message": "ratio must be between 5 and 95"}
         )
     try:
         pxz = _get_pxz()
         target = occurrence_id if occurrence_id is not None else pxz.scene.getRoot()
-        poly_before = pxz.scene.getPolygonCount([target])
+        ref = _occ_ref(occurrence_id)
 
+        if triangle_count is not None:
+            budget = int(triangle_count)
+            tris_before = _tri_count(pxz, [target])
+            if tris_before <= budget:
+                return _ok(
+                    {
+                        "triangles_before": tris_before,
+                        "triangles_after": tris_before,
+                        "target_triangles": budget,
+                        "decimated": False,
+                    },
+                    message="Already within the triangle target; nothing to do.",
+                )
+            pxz.core.startUndoRedoStep(stepName=f"MCP: Decimate to {budget} triangles")
+            try:
+                key = _decimate_to_count(pxz, [target], budget)
+            finally:
+                pxz.core.endUndoRedoStep()
+            return _ok(
+                {
+                    "triangles_before": tris_before,
+                    "triangles_after": _tri_count(pxz, [target]),
+                    "target_triangles": budget,
+                    "decimated": True,
+                },
+                script=(
+                    f"algo.decimateTarget(occurrences=[{ref}], "
+                    f"targetStrategy=[{key!r}, {budget}])"
+                ),
+            )
+
+        poly_before = pxz.scene.getPolygonCount([target])
         pxz.core.startUndoRedoStep(stepName=f"MCP: Decimate to {ratio}%")
         try:
             pxz.algo.decimateTarget(
@@ -1192,7 +1288,6 @@ def decimate_target(
         finally:
             pxz.core.endUndoRedoStep()
 
-        ref = _occ_ref(occurrence_id)
         snippet = (
             f"algo.decimateTarget(occurrences=[{ref}], "
             f"targetStrategy=['ratio', {float(ratio)!r}])"
@@ -1208,6 +1303,26 @@ def decimate_target(
         )
     except Exception as exc:
         return _err(exc)
+
+
+# decimateTarget's targetStrategy selector: ["triangleCount", n] or
+# ["ratio", percent]. Verified live on 2026.4: an UNKNOWN key does not raise —
+# "targetCount" / "polygonCount" silently decimate to 0 triangles — so never
+# probe spellings; use the one key that works.
+_COUNT_STRATEGY_KEY = "triangleCount"
+
+
+def _decimate_to_count(pxz, occurrences: list[int], count: int) -> str:
+    """decimateTarget to an absolute triangle count; returns the selector key used."""
+    pxz.algo.decimateTarget(
+        occurrences=occurrences, targetStrategy=[_COUNT_STRATEGY_KEY, int(count)]
+    )
+    return _COUNT_STRATEGY_KEY
+
+
+def _tri_count(pxz, occurrences: list[int], once_per_instance: bool = False) -> int:
+    """Triangle-equivalent count (quads count twice)."""
+    return int(pxz.scene.getPolygonCount(occurrences, True, once_per_instance))
 
 
 @mcp.tool()
@@ -1391,6 +1506,12 @@ def run_python(code: str) -> str:
 
     ⚠  Use with care – this runs arbitrary code inside the Pixyz process on
     the host machine. Only run code the user supplied or has reviewed.
+
+    ⚠  Long jobs: MCP clients typically time out a call after ~30 minutes, but
+    the code keeps running in the server and holds the job slot. Split long
+    work (whole-assembly occlusion, per-part decimation loops) into smaller
+    calls, and never retry a timed-out call blindly: it is probably still
+    running. Avoid core.save on large scenes (see export_scene for why).
     """
     import io
     import contextlib
@@ -1898,8 +2019,25 @@ def _render_view(
         else view.CameraType.Perspective
     )
 
+    # A GPU scene rooted at a sub-occurrence treats it as the scene root, so
+    # its parents' transforms are dropped and the part renders mis-positioned.
+    # Build from the real root and isolate the target instead, restoring the
+    # caller's isolation state afterwards.
+    scene = pxz.scene
+    root = scene.getRoot()
+    restore_isolation = None
+    gpu_roots = [occurrence]
+    if occurrence != root:
+        try:
+            prev = list(scene.getIsolatedOccurrences()) if scene.isIsolated() else []
+            scene.isolate([occurrence])
+            restore_isolation = prev
+            gpu_roots = [root]
+        except Exception:
+            restore_isolation = None  # older SDK without isolate: fall back to the sub-root render
+
     viewer = view.createViewer(resolution, resolution)
-    gpu_scene = view.createGPUScene([occurrence], show_edges)
+    gpu_scene = view.createGPUScene(gpu_roots, show_edges, True)
     try:
         view.addGPUScene(gpu_scene, viewer)
         view.fitCamera(geom.Point3(*direction), cam_type, 60, viewer, [occurrence])
@@ -1912,6 +2050,11 @@ def _render_view(
     finally:
         view.destroyViewer(viewer)
         view.destroyGPUScene(gpu_scene)
+        if restore_isolation is not None:
+            if restore_isolation:
+                scene.isolate(restore_isolation)
+            else:
+                scene.unisolate()
 
 
 def _png_to_image_content(file_path: str) -> "ImageContent":
@@ -2326,6 +2469,7 @@ def set_occurrence_visibility(
 def merge_occurrences(
     occurrence_ids: list[int],
     delete_empty_parents: bool = True,
+    by_material: bool = False,
 ) -> str:
     """
     Merge a list of part occurrences into a single part. Useful for reducing
@@ -2335,6 +2479,17 @@ def merge_occurrences(
         occurrence_ids:       List of occurrence IDs to merge together.
         delete_empty_parents: Remove parent nodes left empty after the merge.
                               Default: True.
+        by_material:          Produce one merged part per material instead of
+                              a single part, so materials survive the merge
+                              (fewer draw calls without collapsing everything
+                              onto one material). Uses
+                              scene.mergePartOccurrencesByMaterials, falling
+                              back to grouping by active material where that
+                              call is unavailable.
+
+    Parts with no triangles (empty or line-only geometry) are skipped and
+    reported in `skipped_empty_ids`: merging them adds nothing and can make
+    the merge fail on large CAD assemblies.
 
     Returns the ID and polygon count of the merged result.
     """
@@ -2345,41 +2500,744 @@ def merge_occurrences(
         })
     try:
         pxz = _get_pxz()
-        poly_before = pxz.scene.getPolygonCount(occurrence_ids)
+        scene = pxz.scene
+        mergeable, skipped = _split_empty_parts(
+            occurrence_ids, lambda o: scene.getPolygonCount([o], True))
+        if len(mergeable) < 2:
+            return json.dumps({
+                "status": "error",
+                "message": (
+                    f"Only {len(mergeable)} of {len(occurrence_ids)} occurrences have "
+                    "triangles; nothing to merge."
+                ),
+                "skipped_empty_ids": skipped,
+            })
+        poly_before = scene.getPolygonCount(mergeable)
+        root = scene.getRoot()
+        # Capture parents BEFORE merging: the source occurrences may no longer
+        # exist afterwards, which used to make the cleanup a silent no-op.
+        parents = sorted({p for p in (scene.getParent(o) for o in mergeable) if p != root})
 
         pxz.core.startUndoRedoStep(stepName="MCP: Merge Occurrences")
         try:
-            merged = pxz.scene.mergePartOccurrences(occurrence_ids)
-            if delete_empty_parents:
+            if by_material:
+                merged_ids, merge_call = _merge_by_material(pxz, mergeable)
+            else:
+                merged_ids = _as_id_list(scene.mergePartOccurrences(mergeable))
+                merge_call = f"_merged = scene.mergePartOccurrences({mergeable!r})"
+            if delete_empty_parents and parents:
                 with contextlib.suppress(Exception):
-                    pxz.scene.removeEmptyOccurrences(
-                        [pxz.scene.getParent(o) for o in occurrence_ids
-                         if pxz.scene.getParent(o) != pxz.scene.getRoot()]
-                    )
+                    scene.removeEmptyOccurrences(parents)
         finally:
             pxz.core.endUndoRedoStep()
 
-        poly_after = pxz.scene.getPolygonCount([merged])
-        snippet_lines = [f"_merged = scene.mergePartOccurrences({list(occurrence_ids)!r})"]
-        if delete_empty_parents:
-            snippet_lines.append(
-                "scene.removeEmptyOccurrences([\n"
-                f"    scene.getParent(_o) for _o in {list(occurrence_ids)!r}\n"
-                "    if scene.getParent(_o) != scene.getRoot()\n"
-                "])"
-            )
+        poly_after = scene.getPolygonCount(merged_ids) if merged_ids else 0
+        snippet_lines = [merge_call]
+        if delete_empty_parents and parents:
+            snippet_lines.append(f"scene.removeEmptyOccurrences({parents!r})")
         return _ok(
             {
-                "merged_occurrence_id": merged,
-                "source_count": len(occurrence_ids),
+                "merged_occurrence_id": merged_ids[0] if len(merged_ids) == 1 else None,
+                "merged_occurrence_ids": merged_ids,
+                "source_count": len(mergeable),
+                "by_material": by_material,
+                "skipped_empty_ids": skipped,
                 "polygons_before": poly_before,
                 "polygons_after": poly_after,
             },
             message=(
-                f"Merged {len(occurrence_ids)} occurrences → id {merged} "
+                f"Merged {len(mergeable)} occurrences → {merged_ids} "
                 f"({poly_after:,} polygons)"
+                + (f"; skipped {len(skipped)} with no triangles" if skipped else "")
             ),
             script="\n".join(snippet_lines),
+        )
+    except Exception as exc:
+        return _err(exc)
+
+
+def _merge_by_material(pxz, occurrence_ids: list[int]) -> tuple[list[int], str]:
+    """One merged part per material. Returns (merged ids, script line)."""
+    scene = pxz.scene
+    fn = getattr(scene, "mergePartOccurrencesByMaterials", None)
+    if fn is not None:
+        try:
+            return (
+                _as_id_list(fn(occurrence_ids)),
+                f"_merged = scene.mergePartOccurrencesByMaterials({occurrence_ids!r})",
+            )
+        except Exception:
+            pass  # not supported on this platform/SDK -> manual grouping below
+    groups: dict[int, list[int]] = {}
+    for occ in occurrence_ids:
+        try:
+            mat = int(scene.getOccurrenceActiveMaterial(occ))
+        except Exception:
+            mat = 0
+        groups.setdefault(mat, []).append(occ)
+    merged: list[int] = []
+    for members in groups.values():
+        if len(members) > 1:
+            merged.extend(_as_id_list(scene.mergePartOccurrences(members)))
+        else:
+            merged.extend(members)
+    return merged, (
+        "# grouped by scene.getOccurrenceActiveMaterial, then per group:\n"
+        "_merged = scene.mergePartOccurrences(group)"
+    )
+
+
+def _as_id_list(result: Any) -> list[int]:
+    """mergePartOccurrences returns list[int] on current SDKs and an int on
+    older ones; normalise so callers never wrap a list in another list."""
+    if result is None:
+        return []
+    if isinstance(result, int):
+        return [result]
+    return [int(x) for x in result]
+
+
+def _split_empty_parts(occurrence_ids: list[int], tri_count) -> tuple[list[int], list[int]]:
+    """Split ids into (has triangles, no triangles), preserving order."""
+    keep, empty = [], []
+    for occ in occurrence_ids:
+        (keep if tri_count(occ) > 0 else empty).append(occ)
+    return keep, empty
+
+
+# ---------------------------------------------------------------------------
+# Mesh optimisation, repair, materials and instancing tools
+# ---------------------------------------------------------------------------
+
+_AXES = {
+    "x": ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+    "y": ((0.0, 1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    "z": ((0.0, 0.0, 1.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+}
+
+
+def _camera_ring(
+    center: tuple[float, float, float],
+    radius: float,
+    count: int,
+    up_axis: str = "y",
+    include_underbody: bool = True,
+    fov: float = 90.0,
+    elevation_deg: float = 20.0,
+) -> list[tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]]:
+    """Viewpoints (position, direction, up) looking at *center* from outside a
+    sphere of *radius*: a ring of *count* cameras slightly above the equator,
+    one from the top and, optionally, one from underneath."""
+    up, a, b = _AXES[up_axis.lower()]
+    dist = max(radius, 1e-6) / math.sin(math.radians(fov) / 2.0) * 1.05
+
+    def add(v, w, k=1.0):
+        return tuple(v[i] + k * w[i] for i in range(3))
+
+    def norm(v):
+        n = math.sqrt(sum(c * c for c in v)) or 1.0
+        return tuple(c / n for c in v)
+
+    views = []
+    el = math.radians(elevation_deg)
+    for i in range(count):
+        t = 2.0 * math.pi * i / count
+        offset = tuple(
+            math.cos(el) * (math.cos(t) * a[k] + math.sin(t) * b[k]) + math.sin(el) * up[k]
+            for k in range(3)
+        )
+        pos = add(center, offset, dist)
+        d = norm(tuple(center[k] - pos[k] for k in range(3)))
+        dot = sum(up[k] * d[k] for k in range(3))
+        cam_up = norm(tuple(up[k] - dot * d[k] for k in range(3)))
+        views.append((pos, d, cam_up))
+    views.append((add(center, up, dist), tuple(-c for c in up), b))
+    if include_underbody:
+        views.append((add(center, up, -dist), up, b))
+    return views
+
+
+@mcp.tool()
+@_limit_concurrency
+def remove_hidden_geometry(
+    occurrence_id: int | None = None,
+    camera_count: int = 16,
+    include_underbody: bool = True,
+    parts_only: bool = False,
+    up_axis: str = "y",
+    resolution: int = 1024,
+    consider_transparent_opaque: bool = False,
+) -> str:
+    """
+    Delete geometry that no camera around the model can see — internal
+    brackets, fasteners, hidden faces of touching parts. Usually the single
+    biggest triangle saving on CAD before decimation, and it costs no visible
+    quality.
+
+    Renders the model from a ring of viewpoints and removes what never shows
+    up: first whole parts, then (unless parts_only) individual hidden
+    polygons of the parts that remain.
+
+    Args:
+        occurrence_id:     Subtree to process. Defaults to scene root.
+        camera_count:      Viewpoints on the ring around the model (4–64).
+                           More = safer on concave shapes, slower.
+        include_underbody: Add a viewpoint from underneath. Disable for
+                           objects never seen from below (buildings, floor
+                           machinery) to also strip their undersides.
+        parts_only:        Only delete whole occluded parts; keep every
+                           polygon of visible parts.
+        up_axis:           World up axis: "y" (default) or "z" (common in
+                           CAD exports).
+        resolution:        Visibility render resolution. Raise for small
+                           parts that must survive.
+        consider_transparent_opaque: Treat transparent materials as blocking.
+
+    Falls back to scene-sphere part occlusion (algo.findOccludedPartOccurrences,
+    part level only) where viewpoint occlusion is unavailable; `method`
+    reports which ran. Verify with take_screenshot_set afterwards.
+    """
+    if up_axis.lower() not in _AXES:
+        return json.dumps({"status": "error", "message": "up_axis must be x, y or z"})
+    if not (4 <= camera_count <= 64):
+        return json.dumps({"status": "error", "message": "camera_count must be between 4 and 64"})
+    try:
+        pxz = _get_pxz()
+        scene, algo, geom = pxz.scene, pxz.algo, pxz.geom
+        target = occurrence_id if occurrence_id is not None else scene.getRoot()
+        ref = _occ_ref(occurrence_id)
+        tris_before = _tri_count(pxz, [target])
+        parts_before = len(scene.getPartOccurrences(target))
+
+        aabb = scene.getAABB([target])
+        lo, hi = aabb.low, aabb.high
+        center = ((lo.x + hi.x) / 2, (lo.y + hi.y) / 2, (lo.z + hi.z) / 2)
+        radius = math.sqrt((hi.x - lo.x) ** 2 + (hi.y - lo.y) ** 2 + (hi.z - lo.z) ** 2) / 2
+        views = _camera_ring(center, radius, camera_count, up_axis, include_underbody)
+        positions = [geom.Point3(*v[0]) for v in views]
+        directions = [geom.Point3(*v[1]) for v in views]
+        ups = [geom.Point3(*v[2]) for v in views]
+
+        levels_enum = getattr(algo, "SelectionLevel", None)
+        part_level = getattr(levels_enum, "Parts", 0)
+        poly_level = getattr(levels_enum, "Polygons", 2)
+        levels = [("parts", part_level)] + ([] if parts_only else [("polygons", poly_level)])
+
+        method, primary_error, removed_parts = "viewpoints", None, []
+        script = [
+            "# viewpoints: a ring around the AABB (see remove_hidden_geometry); positions/"
+            "directions/ups are lists of geom.Point3",
+        ]
+        pxz.core.startUndoRedoStep(stepName="MCP: Remove hidden geometry")
+        try:
+            try:
+                for name, level in levels:
+                    algo.removeOccludedGeometriesFromViewPoints(
+                        [target], level, positions, directions, ups, int(resolution),
+                        90, consider_transparent_opaque,
+                    )
+                    script.append(
+                        f"algo.removeOccludedGeometriesFromViewPoints([{ref}], "
+                        f"algo.SelectionLevel.{name.capitalize()}, positions, directions, ups, "
+                        f"{int(resolution)}, 90, {consider_transparent_opaque})"
+                    )
+            except Exception as exc:
+                method, primary_error = "occluded_parts_fallback", f"{type(exc).__name__}: {exc}"
+                removed_parts = list(algo.findOccludedPartOccurrences(
+                    [target], int(resolution), camera_count, 90, consider_transparent_opaque,
+                ))
+                if removed_parts:
+                    scene.deleteOccurrences(removed_parts)
+                script = [
+                    f"_hidden = algo.findOccludedPartOccurrences([{ref}], {int(resolution)}, "
+                    f"{camera_count}, 90, {consider_transparent_opaque})",
+                    "scene.deleteOccurrences(_hidden)",
+                ]
+        finally:
+            pxz.core.endUndoRedoStep()
+
+        tris_after = _tri_count(pxz, [target])
+        data = {
+            "method": method,
+            "viewpoints": len(views),
+            "levels": [n for n, _ in levels] if method == "viewpoints" else ["parts"],
+            "triangles_before": tris_before,
+            "triangles_after": tris_after,
+            "triangles_removed": tris_before - tris_after,
+            "parts_before": parts_before,
+            "parts_after": len(scene.getPartOccurrences(target)),
+        }
+        if primary_error:
+            data["viewpoint_occlusion_error"] = primary_error
+        pct = 100.0 * (tris_before - tris_after) / tris_before if tris_before else 0.0
+        return _ok(
+            data,
+            message=f"Removed {tris_before - tris_after:,} hidden triangles ({pct:.1f}%) via {method}",
+            script="\n".join(script),
+        )
+    except Exception as exc:
+        return _err(exc)
+
+
+def _allocate_budget(
+    tris: list[int], scores: list[float], budget: int, min_per_part: int
+) -> list[int]:
+    """Split *budget* across parts proportionally to *scores*, never giving a
+    part more triangles than it already has (water-filling: what capped parts
+    cannot use is redistributed to the rest).
+
+    Each non-empty part's floor (min_per_part, or all it has if fewer) is
+    reserved FIRST and only the rest is shared out, so the total never exceeds
+    the budget unless the floors alone already do."""
+    floor = [min(max(min_per_part, 0), t) if t > 0 else 0 for t in tris]
+    alloc = list(floor)
+    room = [t - f for t, f in zip(tris, floor)]
+    weight = [max(float(sc), 0.0) for sc in scores]
+    remaining = float(budget - sum(floor))
+    active = [i for i, r in enumerate(room) if r > 0]
+    while active and remaining > 0:
+        w = {i: weight[i] for i in active}
+        total = sum(w.values())
+        if total <= 0:  # nothing scored -> split evenly
+            w, total = dict.fromkeys(active, 1.0), float(len(active))
+        capped = [i for i in active if remaining * w[i] / total >= room[i]]
+        if not capped:
+            for i in active:
+                alloc[i] += int(remaining * w[i] / total)
+            break
+        for i in capped:
+            alloc[i] += room[i]
+            remaining -= room[i]
+        active = [i for i in active if i not in capped]
+    return alloc
+
+
+@mcp.tool()
+@_limit_concurrency
+def decimate_to_budget(
+    triangle_budget: int,
+    occurrence_id: int | None = None,
+    weights: dict[str, float] | None = None,
+    min_triangles_per_part: int = 12,
+) -> str:
+    """
+    Decimate a model to a total triangle budget, spending triangles where they
+    show. Large parts get a proportionally larger share than small ones, so
+    small details do not eat the budget and big visible surfaces keep their
+    silhouette — unlike a uniform ratio.
+
+    Each part's share is proportional to its bounding-box surface area times
+    an optional name weight; parts already under their share keep all their
+    triangles and the surplus goes to the rest.
+
+    Args:
+        triangle_budget:        Total triangles wanted for the subtree (e.g.
+                                250000 for a web-viewer GLB).
+        occurrence_id:          Subtree to process. Defaults to scene root.
+        weights:                Optional {name substring: multiplier}, case-
+                                insensitive, e.g. {"body": 3, "screw": 0.2}.
+                                The first match wins; unmatched parts use 1.
+        min_triangles_per_part: Floor so tiny parts do not collapse to nothing.
+
+    Run remove_hidden_geometry first: hidden triangles otherwise take budget.
+    Returns actual vs target, plus the 20 largest allocations.
+    """
+    budget = int(triangle_budget)
+    if budget < 1:
+        return json.dumps({"status": "error", "message": "triangle_budget must be positive"})
+    try:
+        pxz = _get_pxz()
+        scene = pxz.scene
+        target = occurrence_id if occurrence_id is not None else scene.getRoot()
+        parts = list(scene.getPartOccurrences(target))
+        tris = [_tri_count(pxz, [p]) for p in parts]
+        total_before = _tri_count(pxz, [target])
+        if total_before <= budget:
+            return _ok(
+                {
+                    "target_triangles": budget,
+                    "triangles_before": total_before,
+                    "triangles_after": total_before,
+                    "decimated_parts": 0,
+                },
+                message="Already within budget; nothing to do.",
+            )
+
+        lowered = {k.lower(): float(v) for k, v in (weights or {}).items()}
+        names, scores = [], []
+        for p in parts:
+            try:
+                name = scene.getOccurrenceName(p)
+            except Exception:
+                name = ""
+            names.append(name)
+            weight = next((w for key, w in lowered.items() if key in name.lower()), 1.0)
+            try:
+                bb = scene.getAABB([p])
+                dx, dy, dz = bb.high.x - bb.low.x, bb.high.y - bb.low.y, bb.high.z - bb.low.z
+                area = 2.0 * (dx * dy + dy * dz + dz * dx)
+            except Exception:
+                area = 0.0
+            scores.append(max(area, 0.0) * max(weight, 0.0))
+
+        alloc = _allocate_budget(tris, scores, budget, int(min_triangles_per_part))
+        decimated, key = 0, None
+        pxz.core.startUndoRedoStep(stepName=f"MCP: Decimate to budget {budget}")
+        try:
+            for part, have, want in zip(parts, tris, alloc):
+                if 0 < want < have:
+                    key = _decimate_to_count(pxz, [part], want)
+                    decimated += 1
+        finally:
+            pxz.core.endUndoRedoStep()
+
+        total_after = _tri_count(pxz, [target])
+        top = sorted(range(len(parts)), key=lambda i: alloc[i], reverse=True)[:20]
+        return _ok(
+            {
+                "target_triangles": budget,
+                "triangles_before": total_before,
+                "triangles_after": total_after,
+                "within_budget": total_after <= budget,
+                "part_count": len(parts),
+                "decimated_parts": decimated,
+                "largest_allocations": [
+                    {"id": parts[i], "name": names[i], "before": tris[i], "target": alloc[i]}
+                    for i in top
+                ],
+            },
+            message=(
+                f"{total_before:,} → {total_after:,} triangles "
+                f"(budget {budget:,}, {decimated} parts decimated)"
+            ),
+            script=(
+                "# per part, share of the budget by AABB surface area x weight:\n"
+                f"algo.decimateTarget([part], [{(key or 'triangleCount')!r}, part_target])"
+            ),
+        )
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool()
+@_limit_concurrency
+def cleanup_mesh(
+    occurrence_id: int | None = None,
+    delete_free_vertices: bool = True,
+    delete_lines: bool = True,
+    repair: bool = True,
+    repair_tolerance: float = 0.1,
+    orient_faces: bool = True,
+    merge_vertices: bool = False,
+    merge_distance: float = 0.01,
+) -> str:
+    """
+    Clean up tessellated geometry before optimisation or export. Each step can
+    be toggled; a failing step is reported and the rest still run.
+
+    Args:
+        occurrence_id:        Subtree to process. Defaults to scene root.
+        delete_free_vertices: Remove vertices not used by any polygon.
+        delete_lines:         Remove line/curve geometry (wireframe edges,
+                              construction lines) that game engines ignore.
+        repair:               algo.repairMesh: sew cracks within
+                              repair_tolerance, split non-manifold edges and
+                              re-orient.
+        repair_tolerance:     Sewing distance in scene units (mm for most CAD).
+        orient_faces:         Make polygon winding consistent so faces do not
+                              render inside-out.
+        merge_vertices:       Weld boundary vertices closer than
+                              merge_distance — use after removing holes on
+                              perforated sheet, or on meshes that open into
+                              slivers when decimated.
+        merge_distance:       Weld distance in scene units.
+    """
+    try:
+        pxz = _get_pxz()
+        algo = pxz.algo
+        target = occurrence_id if occurrence_id is not None else pxz.scene.getRoot()
+        ref = _occ_ref(occurrence_id)
+        tris_before = _tri_count(pxz, [target])
+
+        steps: list[tuple[str, Any, str]] = []
+        if delete_free_vertices:
+            steps.append(("delete_free_vertices", lambda: algo.deleteFreeVertices([target]),
+                          f"algo.deleteFreeVertices([{ref}])"))
+        if delete_lines:
+            steps.append(("delete_lines", lambda: algo.deleteLines([target]),
+                          f"algo.deleteLines([{ref}])"))
+        if repair:
+            steps.append(("repair_mesh",
+                          lambda: algo.repairMesh([target], float(repair_tolerance), True, True),
+                          f"algo.repairMesh([{ref}], {float(repair_tolerance)!r}, True, True)"))
+        if orient_faces:
+            steps.append(("orient_faces", lambda: algo.orientPolygonFaces([target], True, False),
+                          f"algo.orientPolygonFaces([{ref}], True, False)"))
+        if merge_vertices:
+            def _weld():
+                poly = pxz.polygonal
+                mask = poly.TopologyCategoryMask(
+                    poly.TopologyDimensionMask.FACE, poly.TopologyConnectivityMask.BOUNDARY)
+                algo.mergeVertices([target], float(merge_distance), mask)
+            steps.append(("merge_vertices", _weld,
+                          f"algo.mergeVertices([{ref}], {float(merge_distance)!r}, "
+                          "polygonal.TopologyCategoryMask(polygonal.TopologyDimensionMask.FACE, "
+                          "polygonal.TopologyConnectivityMask.BOUNDARY))"))
+        if not steps:
+            return json.dumps({"status": "error", "message": "All cleanup steps are disabled."})
+
+        results, script = {}, []
+        pxz.core.startUndoRedoStep(stepName="MCP: Cleanup mesh")
+        try:
+            for name, run, snippet in steps:
+                try:
+                    run()
+                    results[name] = "ok"
+                    script.append(snippet)
+                except Exception as exc:
+                    results[name] = f"error: {type(exc).__name__}: {exc}"
+        finally:
+            pxz.core.endUndoRedoStep()
+
+        tris_after = _tri_count(pxz, [target])
+        failed = [k for k, v in results.items() if v != "ok"]
+        return _ok(
+            {"steps": results, "triangles_before": tris_before, "triangles_after": tris_after},
+            message=(f"Cleanup finished; {len(failed)} step(s) failed: {failed}"
+                     if failed else "Cleanup finished"),
+            script="\n".join(script),
+        )
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool()
+@_limit_concurrency
+def fix_normals_uv(
+    occurrence_id: int | None = None,
+    remove_uv: bool = False,
+    uv_channel: int = -1,
+    recompute_normals: bool = True,
+    sharp_angle: float = 25.0,
+    orient_normals: bool = True,
+) -> str:
+    """
+    Fix shading: drop unneeded UVs, rebuild normals and orient them outward.
+    Use after decimation or merging when surfaces look faceted, blotchy or
+    dark, and before export.
+
+    Args:
+        occurrence_id:     Subtree to process. Defaults to scene root.
+        remove_uv:         Remove UV channels first. Untextured CAD rarely
+                           needs UVs, and UV seams stop the decimator from
+                           collapsing edges — removing them first gives
+                           cleaner, lower decimation results.
+        uv_channel:        UV channel to remove; -1 = all channels.
+        recompute_normals: Rebuild normals with algo.createNormals.
+        sharp_angle:       Edges sharper than this (degrees) stay hard. 20–30
+                           suits most mechanical parts; higher smooths more.
+        orient_normals:    Point normals consistently with face orientation.
+    """
+    if not (0.0 < sharp_angle <= 180.0):
+        return json.dumps({"status": "error", "message": "sharp_angle must be in (0, 180]"})
+    try:
+        pxz = _get_pxz()
+        algo = pxz.algo
+        target = occurrence_id if occurrence_id is not None else pxz.scene.getRoot()
+        ref = _occ_ref(occurrence_id)
+        script: list[str] = []
+        pxz.core.startUndoRedoStep(stepName="MCP: Fix normals/UV")
+        try:
+            if remove_uv:
+                algo.removeUV([target], int(uv_channel))
+                script.append(f"algo.removeUV([{ref}], {int(uv_channel)})")
+            if recompute_normals:
+                algo.createNormals([target], float(sharp_angle), True, False)
+                script.append(f"algo.createNormals([{ref}], {float(sharp_angle)!r}, True, False)")
+            if orient_normals:
+                algo.orientNormals([target])
+                script.append(f"algo.orientNormals([{ref}])")
+        finally:
+            pxz.core.endUndoRedoStep()
+        if not script:
+            return json.dumps({"status": "error", "message": "All steps are disabled."})
+        return _ok(
+            {
+                "removed_uv": remove_uv,
+                "recomputed_normals": recompute_normals,
+                "sharp_angle": sharp_angle if recompute_normals else None,
+                "oriented_normals": orient_normals,
+            },
+            message="Normals/UV updated",
+            script="\n".join(script),
+        )
+    except Exception as exc:
+        return _err(exc)
+
+
+def _material_summary(pxz, mat: int) -> dict:
+    info: dict[str, Any] = {"id": mat}
+    try:
+        info["name"] = pxz.core.getProperty(mat, "Name")
+    except Exception:
+        info["name"] = ""
+    try:
+        info["pattern"] = pxz.material.getMaterialPattern(mat)
+    except Exception:
+        pass
+    return info
+
+
+@mcp.tool()
+def list_materials(occurrence_id: int | None = None, limit: int = 500) -> str:
+    """
+    List materials: those used under an occurrence, or every material in the
+    session when occurrence_id is omitted. Returns id, name and pattern
+    (e.g. PBR, standard, color) for use with assign_material.
+
+    Args:
+        occurrence_id: Only materials used in this subtree. Default: all.
+        limit:         Maximum materials returned.
+    """
+    try:
+        pxz = _get_pxz()
+        if occurrence_id is None:
+            mats = list(pxz.material.getAllMaterials())
+        else:
+            mats = list(pxz.scene.getMaterialsFromSubtree(occurrence_id))
+        mats = list(dict.fromkeys(m for m in mats if m))
+        shown = mats[: max(int(limit), 0)]
+        return _ok(
+            {
+                "total": len(mats),
+                "truncated": len(shown) < len(mats),
+                "materials": [_material_summary(pxz, m) for m in shown],
+            },
+            message=f"{len(mats)} material(s)",
+        )
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool()
+def assign_material(
+    occurrence_ids: list[int],
+    material_id: int | None = None,
+    material_name: str | None = None,
+) -> str:
+    """
+    Assign an existing material to occurrences (applies to their subtrees
+    unless a child overrides it). Pick the material by id (list_materials) or
+    by exact name.
+
+    Args:
+        occurrence_ids: Occurrences to assign to.
+        material_id:    Material id.
+        material_name:  Exact material name, used when material_id is omitted.
+                        If several materials share the name the first is used
+                        and the rest are reported.
+    """
+    if not occurrence_ids:
+        return json.dumps({"status": "error", "message": "Provide at least one occurrence id."})
+    if material_id is None and not material_name:
+        return json.dumps({"status": "error", "message": "Provide material_id or material_name."})
+    try:
+        pxz = _get_pxz()
+        others: list[int] = []
+        if material_id is None:
+            found = list(pxz.material.findMaterialsByProperty("Name", material_name))
+            if not found:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"No material named {material_name!r}; see list_materials.",
+                })
+            material_id, others = found[0], found[1:]
+        pxz.core.startUndoRedoStep(stepName="MCP: Assign material")
+        try:
+            for occ in occurrence_ids:
+                pxz.scene.setOccurrenceMaterial(occ, material_id)
+        finally:
+            pxz.core.endUndoRedoStep()
+        data = {"material": _material_summary(pxz, material_id), "occurrence_ids": occurrence_ids}
+        if others:
+            data["other_materials_with_same_name"] = others
+        return _ok(
+            data,
+            message=f"Assigned material {material_id} to {len(occurrence_ids)} occurrence(s)",
+            script=f"for _o in {occurrence_ids!r}:\n    scene.setOccurrenceMaterial(_o, {material_id})",
+        )
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool()
+@_limit_concurrency
+def instance_similar_parts(
+    occurrence_id: int | None = None,
+    fast: bool = False,
+    dimensions_similarity: float = 1.0,
+    polycount_similarity: float = 1.0,
+    ignore_symmetry: bool = False,
+    vertex_precision: int = 3,
+) -> str:
+    """
+    Replace repeated identical parts (bolts, clips, wheels) with instances of
+    one shared mesh. Cuts unique geometry, file size and GPU memory without
+    changing how the model looks.
+
+    Args:
+        occurrence_id:         Subtree to process. Defaults to scene root.
+        fast:                  Use the approximate dimension/polycount match
+                               instead of exact topology checksums. Faster on
+                               huge assemblies; with similarities below 1.0 it
+                               also catches near-duplicates (destructive).
+        dimensions_similarity: Fast mode: 1.0 = identical dimensions only.
+        polycount_similarity:  Fast mode: 1.0 = identical polycount only.
+        ignore_symmetry:       Fast mode: do not match mirrored parts (by
+                               default they become negatively scaled instances).
+        vertex_precision:      Exact mode: vertex position precision.
+
+    Reports unique triangles (each instanced mesh counted once) before/after.
+    """
+    for v in (dimensions_similarity, polycount_similarity):
+        if not (0.0 < v <= 1.0):
+            return json.dumps({"status": "error", "message": "similarities must be in (0, 1]"})
+    try:
+        pxz = _get_pxz()
+        target = occurrence_id if occurrence_id is not None else pxz.scene.getRoot()
+        ref = _occ_ref(occurrence_id)
+        unique_before = _tri_count(pxz, [target], once_per_instance=True)
+        pxz.core.startUndoRedoStep(stepName="MCP: Instance similar parts")
+        try:
+            if fast:
+                pxz.algo.convertSimilarPartOccurrencesToInstancesFast(
+                    [target], float(dimensions_similarity), float(polycount_similarity),
+                    bool(ignore_symmetry))
+                snippet = (
+                    f"algo.convertSimilarPartOccurrencesToInstancesFast([{ref}], "
+                    f"{float(dimensions_similarity)!r}, {float(polycount_similarity)!r}, "
+                    f"{bool(ignore_symmetry)})"
+                )
+            else:
+                prec = int(vertex_precision)
+                pxz.algo.convertSimilarPartOccurrencesToInstances(
+                    [target], True, True, prec, False, False, prec)
+                snippet = (
+                    f"algo.convertSimilarPartOccurrencesToInstances([{ref}], True, True, "
+                    f"{prec}, False, False, {prec})"
+                )
+        finally:
+            pxz.core.endUndoRedoStep()
+        unique_after = _tri_count(pxz, [target], once_per_instance=True)
+        return _ok(
+            {
+                "method": "fast" if fast else "exact",
+                "unique_triangles_before": unique_before,
+                "unique_triangles_after": unique_after,
+                "rendered_triangles": _tri_count(pxz, [target]),
+            },
+            message=f"Unique triangles {unique_before:,} → {unique_after:,}",
+            script=snippet,
         )
     except Exception as exc:
         return _err(exc)

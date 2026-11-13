@@ -87,6 +87,9 @@ Replace `C:\\path\\to\\Asset_Manager_MCP` with the actual path.
 | `delete_project` | Permanently delete a project (archive + delete; requires org Owner/Manager and `confirm=True`) |
 | `set_default_project` | Set the default project ID for this server process |
 | `set_default_project_by_name` | Set the default project by name |
+| `list_features` | List the Asset Manager features that can be enabled on a project |
+| `add_project_features` | Enable features on a project |
+| `remove_project_features` | Disable features on a project |
 
 ### Asset Lifecycle
 
@@ -120,6 +123,7 @@ Replace `C:\\path\\to\\Asset_Manager_MCP` with the actual path.
 | `list_assets` | List all assets in a project, including custom metadata. Supports `metadata_filter` |
 | `search_assets_across_projects` | Search every project in the org at once — each match reports the project(s) it lives in |
 | `list_asset_versions` | List ALL versions of an asset, including older frozen ones, with change logs |
+| `check_dataset_in_asset` | Confirm a dataset belongs to an asset version and whether it is the preview dataset |
 
 ### Trash & Sharing
 

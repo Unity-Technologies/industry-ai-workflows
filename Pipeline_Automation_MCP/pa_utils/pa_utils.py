@@ -20,14 +20,16 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from .unity_auth import cloud_env as _cloud_env
 from .unity_auth import vpc as _vpc
 
 # Candidate bases in preference order. On public cloud (or with an explicit
 # UNITY_VPC_AUTOMATION_PATH) this collapses to a single base and the fallback
-# machinery below never engages.
+# machinery below never engages. The public host comes from
+# unity_auth/cloud_env.py.
 _BASE_CANDIDATES: list[str] = []
 for _path in _vpc.automation_service_paths():
-    _base = _vpc.api_base("https://automation.services.api.unity.com/v1", _path.lstrip("/"))
+    _base = _vpc.api_base(_cloud_env.url("automation", "/v1"), _path.lstrip("/"))
     if _base not in _BASE_CANDIDATES:
         _BASE_CANDIDATES.append(_base)
 
@@ -853,12 +855,36 @@ def terminate_job(session: requests.Session, org_id: str, job_id: str) -> dict:
     return resp.json()
 
 
+def stop_job(session: requests.Session, org_id: str, job_id: str) -> dict:
+    # Distinct route from terminate (2026-11 spec: "Stop a job"); same
+    # {"status": <JobStatus>} response, 409 when the status forbids it.
+    resp = _put(session, _url("organizations", org_id, "jobs", job_id, "stop"))
+    _raise(resp)
+    return resp.json()
+
+
+def _step_params(job_pipeline_uid: str = "", start_line: int | None = None) -> dict[str, Any] | None:
+    """Query params shared by the step-scoped job routes (approve/resume/logs).
+
+    jobPipelineUid disambiguates a stepId that appears in more than one
+    pipeline-reference invocation of the same job; without it the API answers
+    409 when the stepId is ambiguous. startLine (logs only) skips earlier lines.
+    """
+    params: dict[str, Any] = {}
+    if job_pipeline_uid:
+        params["jobPipelineUid"] = job_pipeline_uid
+    if start_line is not None:
+        params["startLine"] = start_line
+    return params or None
+
+
 def resume_job(
     session: requests.Session,
     org_id: str,
     job_id: str,
     step_id: str,
     parameters: dict | None = None,
+    job_pipeline_uid: str = "",
 ) -> dict:
     # verified live: resume is step-scoped — PUT
     # .../jobs/{jobId}/steps/{stepId}/resume. The job-level
@@ -866,7 +892,8 @@ def resume_job(
     # parameters populates ResumeJobStepRequest for suspend steps that wait
     # for user-supplied input.
     body = {"parameters": parameters} if parameters else None
-    resp = _put(session, _url("organizations", org_id, "jobs", job_id, "steps", step_id, "resume"), json=body)
+    resp = _put(session, _url("organizations", org_id, "jobs", job_id, "steps", step_id, "resume"),
+                json=body, params=_step_params(job_pipeline_uid))
     _raise(resp)
     return resp.json()
 
@@ -878,6 +905,7 @@ def approve_job_step(
     step_id: str,
     approved: bool,
     comment: str = "",
+    job_pipeline_uid: str = "",
 ) -> dict:
     body: dict[str, Any] = {"approved": approved}
     if comment:
@@ -885,6 +913,7 @@ def approve_job_step(
     resp = _put(session,
         _url("organizations", org_id, "jobs", job_id, "steps", step_id, "approve"),
         json=body,
+        params=_step_params(job_pipeline_uid),
     )
     _raise(resp)
     return resp.json()
@@ -957,6 +986,16 @@ def terminate_project_job(
     return resp.json()
 
 
+def stop_project_job(
+    session: requests.Session, org_id: str, project_id: str, job_id: str
+) -> dict:
+    resp = _put(session,
+        _url("organizations", org_id, "projects", project_id, "jobs", job_id, "stop")
+    )
+    _raise(resp)
+    return resp.json()
+
+
 def resume_project_job(
     session: requests.Session,
     org_id: str,
@@ -964,12 +1003,14 @@ def resume_project_job(
     job_id: str,
     step_id: str,
     parameters: dict | None = None,
+    job_pipeline_uid: str = "",
 ) -> dict:
     # Step-scoped, same as resume_job; parameters populates ResumeJobStepRequest.
     body = {"parameters": parameters} if parameters else None
     resp = _put(session,
         _url("organizations", org_id, "projects", project_id, "jobs", job_id, "steps", step_id, "resume"),
         json=body,
+        params=_step_params(job_pipeline_uid),
     )
     _raise(resp)
     return resp.json()
@@ -983,6 +1024,7 @@ def approve_project_job_step(
     step_id: str,
     approved: bool,
     comment: str = "",
+    job_pipeline_uid: str = "",
 ) -> dict:
     body: dict[str, Any] = {"approved": approved}
     if comment:
@@ -993,6 +1035,7 @@ def approve_project_job_step(
             "jobs", job_id, "steps", step_id, "approve",
         ),
         json=body,
+        params=_step_params(job_pipeline_uid),
     )
     _raise(resp)
     return resp.json()
@@ -1003,10 +1046,16 @@ def approve_project_job_step(
 # ---------------------------------------------------------------------------
 
 def get_job_step_logs(
-    session: requests.Session, org_id: str, job_id: str, step_id: str
+    session: requests.Session,
+    org_id: str,
+    job_id: str,
+    step_id: str,
+    job_pipeline_uid: str = "",
+    start_line: int | None = None,
 ) -> Any:
     resp = _get(session,
-        _url("organizations", org_id, "jobs", job_id, "steps", step_id, "logs")
+        _url("organizations", org_id, "jobs", job_id, "steps", step_id, "logs"),
+        params=_step_params(job_pipeline_uid, start_line),
     )
     _raise(resp)
     try:
@@ -1021,12 +1070,15 @@ def get_project_job_step_logs(
     project_id: str,
     job_id: str,
     step_id: str,
+    job_pipeline_uid: str = "",
+    start_line: int | None = None,
 ) -> Any:
     resp = _get(session,
         _url(
             "organizations", org_id, "projects", project_id,
             "jobs", job_id, "steps", step_id, "logs",
-        )
+        ),
+        params=_step_params(job_pipeline_uid, start_line),
     )
     _raise(resp)
     try:
@@ -1192,6 +1244,72 @@ def get_pipeline_template(
 ) -> dict:
     resp = _get(session,
         _url("organizations", org_id, "pipeline-templates", pipeline_template_id)
+    )
+    _raise(resp)
+    return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Project Service workers (project-scoped only; Automation Admin role)
+# ---------------------------------------------------------------------------
+# These routes have no organisation-level twin in the API, so there is no
+# org/project pair here. send-command is marked "Temporary" in the spec (to be
+# replaced by a Pipeline Broker service) — expect it to disappear.
+
+def start_worker(
+    session: requests.Session, org_id: str, project_id: str, body: dict[str, Any]
+) -> dict | None:
+    """POST .../worker/start. 202 = the worker's job was created and queued,
+    not that the worker is serving. 409 while another start/stop of the same
+    namespace is in flight; 429 at the instance's worker cap."""
+    resp = _post(session,
+        _url("organizations", org_id, "projects", project_id, "worker", "start"),
+        json=body,
+    )
+    _raise(resp)
+    return resp.json() if resp.content else None
+
+
+def stop_worker(
+    session: requests.Session, org_id: str, project_id: str, job_id: str
+) -> dict:
+    """Terminate the worker's job (job id from start_worker / list_jobs)."""
+    resp = _put(session,
+        _url("organizations", org_id, "projects", project_id, "worker", job_id, "stop")
+    )
+    _raise(resp)
+    return resp.json()
+
+
+def stop_project_service(
+    session: requests.Session, org_id: str, project_id: str, namespace: str
+) -> dict:
+    """Stop the Project Service instance in a namespace; cascades to its
+    workers. 200 or 202 with {jobId, jobStatus, workers}."""
+    resp = _put(session,
+        _url("organizations", org_id, "projects", project_id, "projectservice", namespace, "stop")
+    )
+    _raise(resp)
+    return resp.json()
+
+
+def send_project_service_command(
+    session: requests.Session,
+    org_id: str,
+    project_id: str,
+    namespace: str,
+    commands: list[str],
+    headers: dict[str, str] | None = None,
+) -> dict:
+    """Dispatch commands (each `command:<name>;arg:<value>`) to a running
+    Project Service instance. `headers` travel in the BODY so gateways cannot
+    strip them (e.g. X-Plastic-Authorization)."""
+    body: dict[str, Any] = {"namespace": namespace, "commands": commands}
+    if headers:
+        body["headers"] = headers
+    resp = _post(session,
+        _url("organizations", org_id, "projects", project_id, "projectservice", "send-command"),
+        json=body,
     )
     _raise(resp)
     return resp.json()

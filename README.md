@@ -171,6 +171,11 @@ clients is experimental (the Claude Code plugins are the tested path), but the
 recipe is always the same: **build the environment for each server you want,
 then register an interpreter + script pair** in the client's MCP configuration.
 
+**Using GitHub Copilot?** Give [COPILOT_SETUP.md](COPILOT_SETUP.md) to the Copilot
+agent and ask it to follow the steps. It builds the environments, registers the
+servers in VS Code or the Copilot CLI, and installs the skills. Don't use
+`copilot plugin install` for these plugins yet. The guide explains why.
+
 **Step 1 — clone and build:**
 
 ```text
@@ -375,7 +380,7 @@ headers on requests the servers already make to Unity Cloud:
 `[source]@[version]` convention for naming the tool behind an API call:
 `uam_mcp@<version>` from Asset Manager, `upa_mcp@<version>` from Pipeline
 Automation) and the standard `User-Agent` header, e.g.
-`UAM_MCP/0.7.3 (claude-code; Windows)` — tool name and version, the agent
+`UAM_MCP/0.7.4 (claude-code; Windows)` — tool name and version, the agent
 driving it (the MCP client name your editor reports, e.g. Claude Code or
 Copilot), and the OS family, so Unity can attribute API traffic to this
 tool. Each plugin reports its own version, so Asset Manager and Pipeline

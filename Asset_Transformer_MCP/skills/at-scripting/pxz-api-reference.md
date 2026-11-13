@@ -1,15 +1,15 @@
 # pxz API Reference
 
-<!-- pxz-verified-version: 2026.4.0.0 -->
+<!-- pxz-verified-version: 2026.5.0.0 -->
 <!-- This marker records the SDK version the signatures below were extracted from.
      It must equal the installed pxz version. When you bump the SDK, re-extract
      this reference from the new stubs and update it. -->
 
-Authoritative reference for the Asset Transformer (`pxz`) Python SDK, version **2026.4.0.0** (docs: <https://docs.unity.com/en-us/asset-transformer-sdk/2026.4/api/python/pxz_functions>).
+Authoritative reference for the Asset Transformer (`pxz`) Python SDK, version **2026.5.0.0** (docs: <https://docs.unity.com/en-us/asset-transformer-sdk/2026.5/api/python/pxz_functions>).
 
 **Modules covered:** `core`, `scene`, `algo`, `io`, `geom`, `view`, `material`, `polygonal`, `cad`, `raytrace`. The `unity` module is intentionally omitted (Unity-editor integration, not applicable to headless AT scripting).
 
-> **Version note.** Signatures below are verified against the `*.pyi` type stubs shipped inside the installed `pxz` package, currently **2026.4.0.0** — the exact surface the in-process `run_python` tool executes against, and therefore the ground truth for what works. Re-extract this reference from the stubs whenever the SDK is upgraded so the marker never drifts from the installed pxz version. (The 2026.4.0.0 surface is identical to 2026.3.2.1 for every covered module.)
+> **Version note.** Signatures below are verified against the `*.pyi` type stubs shipped inside the installed `pxz` package, currently **2026.5.0.0** — the exact surface the in-process `run_python` tool executes against, and therefore the ground truth for what works. Re-extract this reference from the stubs whenever the SDK is upgraded so the marker never drifts from the installed pxz version. (2026.5.0.0 differs from 2026.4.0.0 only in `core.configureLicenseServer`, whose `flexLM: bool` became `serverType: LicenseServerType`, plus a new `core.LicenseServerType` enum; every other covered signature is unchanged.)
 
 ## Ground rules for using this reference
 
@@ -41,6 +41,7 @@ Session, properties, undo/redo, logging, license, callbacks.
 
 ```python
 class Verbose(IntEnum)            # log levels for addConsoleVerbose / log
+class LicenseServerType(IntEnum)  # PIXYZ = 0, FLEXLM = 1, UNITY = 2 (2026.5+; configureLicenseServer serverType)
 class PropertyType(IntEnum)
 class Stability(IntEnum)
 class InheritableBool(IntEnum)
@@ -165,7 +166,7 @@ def setCurrentThreadAsProcessThread() -> None
 
 ```python
 def checkLicense() -> bool
-def configureLicenseServer(address: str, port: int, flexLM: bool = True) -> None
+def configureLicenseServer(address: str, port: int, serverType: LicenseServerType = 1, toolset: str = "") -> None
 def installLicense(licensePath: str, user: bool = False) -> None
 def generateActivationCode(filePath: str) -> None
 def generateDeactivationCode(filePath: str) -> None
@@ -264,7 +265,7 @@ def exportScene(fileName: str, root: int = 0) -> None
 def exportSelection(fileName: str, keepIntermediaryNodes: bool = False) -> None
 ```
 
-> Format is **inferred from file extension only** — there is no `format=` / `binaryGLTF=` / `embedTextures=` / `exportLODs=` keyword. To get a GLB, save as `.glb`. To inject FBX/GLTF tuning, use `core.setModuleProperty("io", "<key>", "<value>")` before calling `exportScene` (the per-format options are exposed as module-properties, not function args).
+> Format is **inferred from file extension only** — there is no `format=` / `binaryGLTF=` / `embedTextures=` / `exportLODs=` keyword. To get a GLB, save as `.glb`. To inject FBX/GLTF tuning, use `core.setModuleProperty("IO", "<key>", "<value>")` before calling `exportScene` (module names are case-sensitive — `"io"` is rejected; `core.listModuleProperties("IO")` lists the keys) (the per-format options are exposed as module-properties, not function args).
 
 ### Format introspection
 
@@ -872,7 +873,7 @@ def decimatePointClouds(occurrences: list[int], tolerance: float = 500) -> None
 def evalDecimateErrorForTarget(occurrences: list[int], TargetStrategy: list, boundaryWeight: float = 1., normalWeight: float = 1., UVWeight: float = 1., sharpNormalWeight: float = 1., UVSeamWeight: float = 10., forbidUVFoldovers: bool = True, protectTopology: bool = False) -> float
 ```
 
-`targetStrategy` and `TargetStrategy` are list-typed; common shapes include `["ratio", float]` and `["polygonCount", int]` based on observed usage in this repo.
+`targetStrategy` and `TargetStrategy` are list-typed selectors. Verified live (2026.4): the only keys are `["triangleCount", int]` and `["ratio", float]`, where the ratio is a **percentage** (`50.0` keeps half; `0.5` keeps 0.5%). An unknown key such as `"targetCount"` or `"polygonCount"` does **not** raise — it decimates to 0 triangles — so always check `scene.getPolygonCount(occs, True)` afterwards.
 
 ### Mesh repair / cleanup
 
