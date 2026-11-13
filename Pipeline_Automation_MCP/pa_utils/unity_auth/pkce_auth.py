@@ -53,10 +53,16 @@ the public-cloud proxy flow, per Unity VPC deployment docs:
    same Rejected (400/401/403 -> clear cache) / Unavailable (transport, 5xx ->
    keep cache) classification as public mode.
 
-The cached bundle records its `mode` ("public"/"vpc") and, for VPC, the
-`issuer` (FQDN), so a token minted for one deployment is never presented to
-another: a mismatch reads as "not logged in". Cache files written before this
-existed have no mode field and are treated as public.
+The cached bundle records its `mode` ("public"/"vpc") and its `issuer` (the
+FQDN on VPC; on public cloud empty for production, "staging" for staging), so
+a token minted for one deployment is never presented to another: a mismatch
+reads as "not logged in". Cache files written before this existed have no mode
+field and are treated as public production.
+
+Staging
+-------
+UNITY_CLOUD_ENV=staging (see cloud_env.py) runs the public-cloud flow above
+unchanged against Unity's staging hosts.
 """
 
 from __future__ import annotations
@@ -79,7 +85,7 @@ from pathlib import Path
 
 import requests
 
-from . import vpc
+from . import cloud_env, vpc
 from ..version import attribution_headers
 
 
@@ -88,11 +94,13 @@ from ..version import attribution_headers
 # ---------------------------------------------------------------------------
 
 CLIENT_ID = "unity_cloud"
-PROXY_LOGIN_REDIRECT_ROUTE = "services.api.unity.com/app-linking/v1/login/redirect/"
-PROXY_LOGIN_COMPLETED_ROUTE = "services.api.unity.com/app-linking/v1/login/completed/"
-LOGIN_URL = "https://api.unity.com/v1/oauth2/authorize"
-TOKEN_URL = "https://services.api.unity.com/app-linking/v1/token"
-TOKEN_EXCHANGE_URL = "https://services.api.unity.com/app-linking/v1/token/exchange"
+# Hosts follow UNITY_CLOUD_ENV (production by default, or staging) — see
+# cloud_env.py. Resolved once at import, like the REST bases.
+PROXY_LOGIN_REDIRECT_ROUTE = f"{cloud_env.host('services')}/app-linking/v1/login/redirect/"
+PROXY_LOGIN_COMPLETED_ROUTE = f"{cloud_env.host('services')}/app-linking/v1/login/completed/"
+LOGIN_URL = cloud_env.url("genesis", "/v1/oauth2/authorize")
+TOKEN_URL = cloud_env.url("services", "/app-linking/v1/token")
+TOKEN_EXCHANGE_URL = cloud_env.url("services", "/app-linking/v1/token/exchange")
 APP_NAMESPACE = "com.unity.cloud"
 TARGET_CLIENT_ID = "ads-publisher"  # required by the Genesis -> Services exchange
 
@@ -143,14 +151,22 @@ def current_mode() -> str:
 
 
 def current_issuer() -> str:
-    """The private-cloud FQDN in VPC mode; empty string on public cloud."""
-    return vpc.vpc_fqdn()
+    """Which deployment a token is minted for, beyond its mode.
+
+    VPC: the private-cloud FQDN. Public cloud: empty for production — the value
+    every bundle written before environments existed carries, so those stay
+    valid — and the environment name otherwise (``staging``)."""
+    if vpc.is_vpc():
+        return vpc.vpc_fqdn()
+    env = cloud_env.cloud_env()
+    return "" if env == cloud_env.PRODUCTION else env
 
 
 def deployment_label() -> str:
     """Human-readable description of the deployment tools are talking to."""
-    fqdn = current_issuer()
-    return f"Unity private cloud ({fqdn})" if fqdn else "Unity Cloud"
+    if current_mode() == MODE_VPC:
+        return f"Unity private cloud ({current_issuer()})"
+    return f"Unity Cloud ({current_issuer()})" if current_issuer() else "Unity Cloud"
 
 
 def token_home_env() -> str:
@@ -471,7 +487,7 @@ class TokenBundle:
     # cloud) is never presented to another. Files written before these fields
     # existed have no mode and are read as public.
     mode: str = MODE_PUBLIC
-    issuer: str = ""               # VPC FQDN in vpc mode; empty on public cloud
+    issuer: str = ""               # VPC FQDN in vpc mode; on public cloud "" (production) or the environment name
 
     def to_json(self) -> dict:
         return {
@@ -501,9 +517,7 @@ class TokenBundle:
 
     def matches_deployment(self) -> bool:
         """True when this bundle belongs to the deployment configured right now."""
-        if self.mode != current_mode():
-            return False
-        return self.mode != MODE_VPC or self.issuer == current_issuer()
+        return self.mode == current_mode() and self.issuer == current_issuer()
 
 
 def _read_bundle_file(path: Path) -> TokenBundle | None:
@@ -679,6 +693,7 @@ def _bundle_from_responses(genesis: dict, services: dict, prev_refresh: str | No
         id_token=genesis.get("id_token"),
         expires_at=time.time() + expires_in,
         mode=MODE_PUBLIC,
+        issuer=current_issuer(),
     )
 
 
@@ -826,10 +841,12 @@ def _usable_bundle() -> TokenBundle:
             "No cached Unity login. Call the `unity_login` MCP tool to sign in."
         )
     if not bundle.matches_deployment():
-        where = (
-            f"private cloud '{current_issuer()}'" if current_mode() == MODE_VPC
-            else "the public Unity Cloud"
-        )
+        if current_mode() == MODE_VPC:
+            where = f"private cloud '{current_issuer()}'"
+        elif current_issuer():
+            where = f"Unity Cloud {current_issuer()}"
+        else:
+            where = "the public Unity Cloud"
         raise NotLoggedInError(
             f"The cached login was for a different deployment. Call the "
             f"`unity_login` MCP tool to sign in to {where}."

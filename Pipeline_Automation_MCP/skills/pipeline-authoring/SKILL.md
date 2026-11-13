@@ -335,6 +335,11 @@ the target org. Discover the ID in the org you're authoring for:
 > the example pipelines validate against (observed on public cloud —
 > re-discover before use), and per-action parameter tables.
 
+> **Creo View (`.pvz`) inputs** need a Wine conversion before pxz can import
+> them. "Execute custom script" 1.3.x supports it inside the script step. See
+> "Creo View (.pvz) input" in `known-action-ids.md` for the command and the
+> version history.
+
 **Get asset — input parameters**
 
 | Key | Required | Description |
@@ -369,9 +374,11 @@ the target org. Discover the ID in the org you're authoring for:
 |---|---|---|
 | `projectId` | Yes | Target project |
 | `assetName` | Yes | Name for the new asset |
-| `assetType` | No | e.g. `"3D Model"` |
+| `assetType` | No | Exact API spelling, e.g. `"3D Model"`, `"2D Asset"`. The action passes it straight to the API, so `"2D asset"` fails with 40203 (`Asset.PrimaryType` invalid). (The Asset Manager MCP normalises spellings; this action does not.) |
 | `assetTags` | No | **Must be an array** (e.g. `["tag1"]`). Passing a string causes HTTP 400 (code 55). |
 | `collectionPath` | No | Collection to place the asset in |
+| `sourceProjectId` / `sourceAssetId` / `sourceAssetVersionId` / `sourceDatasetDescriptor` | No | The asset this one was produced from. When set, the **source** asset gets a reference to the new asset. |
+| `referenceType` | No | `Converted` (the server default) or `Dependency` — the coarse type of that reference |
 
 **Create asset — output parameters**
 
@@ -383,6 +390,8 @@ the target org. Discover the ID in the org you're authoring for:
 | `projectId` | Project the asset was created in |
 | `assetName` | Name of the created asset |
 
+`Create asset` creates the `Source` and `Preview` datasets itself (a `ReferenceOutput` dataset may also appear), so no separate dataset step is needed: point a later `Add file` at `Preview` via `datasetDescriptor`.
+
 **Add file — input parameters**
 
 | Key | Required | Description |
@@ -393,6 +402,17 @@ the target org. Discover the ID in the org you're authoring for:
 | `datasetDescriptor` | No | Dataset to upload into |
 | `uploadDirectory` | No | Local directory whose contents are uploaded (default: all files in workspace) |
 | `freezeAsset` | No | `true` to freeze the asset version after upload |
+
+> **Publish a converted output as a new, referenced asset, not into a dataset
+> of the source.** When a step produces a file converted from the input asset
+> (CAD → GLB, an optimised LOD, a USD package), chain **`Create asset`** with
+> `sourceProjectId` / `sourceAssetId` / `sourceAssetVersionId` set to the input
+> asset and `referenceType: "Converted"`, then **`Add file`** into the asset that
+> step returns (`{{steps.<create-step>.outputs.assetId}}`). Do not `Add file`
+> into the source asset with a custom `datasetDescriptor`. The output then has
+> its own versions, status and preview, and the dashboard shows where it came
+> from. Use `referenceType: "Dependency"` for parts split out of a model rather
+> than conversions of it.
 
 **Execute custom script — configurationId**
 

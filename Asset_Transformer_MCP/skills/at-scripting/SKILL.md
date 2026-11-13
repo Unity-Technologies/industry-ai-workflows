@@ -58,7 +58,7 @@ Tell the user clearly about the trade-off: remote execution works without a seat
 - Get the root: `root = pxz.scene.getRoot()`.
 - Most scene/algo functions take a **list** of occurrences, even for one: `pxz.algo.tessellate([root], ...)`.
 - Real names use verbs on the module: `scene.getOccurrenceName(occ)`, `scene.deleteOccurrences([occ])`, `scene.getChildren(occ)`. There is **no** `scene.getName`, `scene.deleteNodes`, `node.name`.
-- `io.exportScene(fileName, root=0)` infers format from the file **extension** — there is no `format=`/`binaryGLTF=`/`embedTextures=` keyword. Per-format tuning goes through `core.setModuleProperty("io", "<key>", "<value>")` *before* the export call.
+- `io.exportScene(fileName, root=0)` infers format from the file **extension** — there is no `format=`/`binaryGLTF=`/`embedTextures=` keyword. Per-format tuning goes through `core.setModuleProperty("IO", "<key>", "<value>")` *before* the export call. Module names are case-sensitive: `"io"` raises `invalid module name`; list a module's keys with `core.listModuleProperties("IO")`.
 
 ## Script structure (in-process)
 
@@ -88,14 +88,46 @@ Wrap genuinely multi-step, state-changing work in an undo/redo step so the sessi
 ```python
 pxz.core.startUndoRedoStep(stepName="run_python: decimate")
 try:
-    pxz.algo.decimateTarget([root], ["ratio", 0.5])
+    pxz.algo.decimateTarget([root], ["ratio", 50.0])  # percent: 50.0 halves it
 finally:
     pxz.core.endUndoRedoStep()
 ```
 
+## Tools vs. `run_python`
+
+The MCP exposes about 40 purpose-built tools. The SDK's ten documented modules hold over a thousand functions. The tools wrap the common workflows; everything else is reached through `run_python`. Neither path is second-class: tools add undo steps, input checks, license handling and a `script_equivalent` field showing the pxz calls they made. `run_python` reaches the whole SDK.
+
+**Use a tool when one fits.** It is quicker and safer, and its `script_equivalent` gives you a tested starting point if you later need to customise it.
+
+| Task | Tool | Main pxz calls behind it |
+|---|---|---|
+| Import / export | `import_file` (`prefer_load_mesh` loads stored tessellation instead of re-meshing), `export_scene` | `io.importScene`, `io.exportScene`, `IO` module properties |
+| CAD prep | `prepare_cad`, `run_pipeline` | `algo.repairCAD`, `algo.tessellate*`, `algo.repairMesh` |
+| Remove hidden interiors | `remove_hidden_geometry` | `algo.removeOccludedGeometriesFromViewPoints` |
+| Decimate | `decimate_target` (`ratio` or `triangle_count`), `decimate_to_budget` (per-part, size-weighted), `optimise_cad`, `generate_lods` | `algo.decimateTarget` |
+| Mesh repair | `cleanup_mesh`, `fix_normals_uv` | `algo.deleteFreeVertices`, `deleteLines`, `repairMesh`, `orientPolygonFaces`, `mergeVertices`, `removeUV`, `createNormals`, `orientNormals` |
+| Materials | `list_materials`, `assign_material` | `material.*`, `scene.setOccurrenceMaterial` |
+| Instancing / merging | `instance_similar_parts`, `merge_occurrences` (`by_material`) | `algo.convertSimilarPartOccurrencesToInstances*`, `scene.mergePartOccurrences*` |
+| Query / tidy | `get_scene_info`, `get_scene_statistics`, `find_occurrences_by_*`, `get_aabb`, `polygon_count`, `batch_delete_by_query`, `set_occurrence_visibility` | `scene.*` |
+| Visuals | `take_screenshot`, `take_screenshot_set`, `render_turntable_video`, `bake_ambient_occlusion` | `view.*`, `algo.combineMaterials` |
+| Record a session as a script | `start_recording` … `dump_recorded_script` | — |
+
+**Use `run_python` for everything else**, for example:
+
+- Topology surgery: `removeHoles`, `deletePatches`, hole filling, `orientPolygonFacesFromCamera`.
+- UV work: `automaticUVMapping`, `unwrapUV`, `repackUV`.
+- Explicit baking sessions: `beginBakingSession` / `bake*Map`.
+- Transforms: `getGlobalMatrix` / `setLocalMatrix`.
+- CAD-level BRep edits (`pxz.cad`), variants, metadata and properties.
+- Any loop over parts that needs logic of its own.
+
+The tested patterns for these are in **[optimisation-recipes.md](optimisation-recipes.md)**: decimation selectors, per-part budgets, LOD chains, perforated plates, world-space centring, inside-out rims and what `bakeVertexAttributes` does and does not transfer.
+
+A good habit is to start with tools and switch to `run_python` when you need control a tool does not give. Seed the script from the tools' `script_equivalent` output, or record the session with `start_recording` and `dump_recorded_script`.
+
 ## Common workflows
 
-Prefer adapting a vetted `examples/` script over generating from scratch. Current examples:
+Prefer adapting a vetted `examples/` script over generating from scratch, and check [optimisation-recipes.md](optimisation-recipes.md) before hand-rolling any reduction or repair step. Current examples:
 
 - `import-prepare-export.py` — in-process import → repair → tessellate (relative to AABB) → repair mesh → export GLB, with triangle-count reporting.
 - `inspect-scene.py` — walk the live stateful scene, report per-occurrence names / triangle counts / AABB without mutating anything (safe to run first when you don't know what's loaded).
@@ -104,7 +136,7 @@ High-level building blocks (all detailed in `pxz-api-reference.md`):
 
 - **Import / export:** `io.importScene`, `io.importFiles`, `io.exportScene` (extension-driven), `io.getImportFormats` / `io.getExportFormats`.
 - **CAD prep:** `algo.repairCAD`, `algo.assembleCAD`, `algo.tessellate` / `algo.tessellateRelativelyToAABB`, `algo.repairMesh`.
-- **Optimize:** `algo.decimate`, `algo.decimateTarget(occ, ["ratio", r])` / `(occ, ["polygonCount", n])`, `algo.removeHoles`, `algo.deletePatches`, `scene.mergePartOccurrences*`, `scene.convertSimilarPartOccurrencesToInstances*` (via `algo`), `algo.removeOccludedGeometries`.
+- **Optimize:** `algo.decimate`, `algo.decimateTarget(occ, ["ratio", percent])` / `(occ, ["triangleCount", n])` (the only two selector keys: any other key silently decimates to 0 triangles; see [optimisation-recipes.md](optimisation-recipes.md)), `algo.removeHoles`, `algo.deletePatches`, `scene.mergePartOccurrences*`, `scene.convertSimilarPartOccurrencesToInstances*` (via `algo`), `algo.removeOccludedGeometries`.
 - **UV:** `algo.automaticUVMapping`, `algo.unwrapUV`, `algo.repackUV`, `algo.mapUvOn*`.
 - **Baking:** `algo.combineMaterials(occ, BakeOption(...))` for the high-level AO-into-materials path; `algo.beginBakingSession` + `algo.bake*Map` + `algo.endBakingSession` for explicit control.
 - **Query / edit:** `scene.getChildren`, `scene.getPolygonCount`, `scene.getAABB`, `scene.findOccurrencesByProperty`, `scene.getFilteredOccurrences`, `scene.deleteOccurrences`, `scene.hide` / `show`.
@@ -148,7 +180,7 @@ Specifically, do not invent:
 
 - Classes, functions, parameters, or constants (the reference is authoritative).
 - Object-style APIs like `scene.Node`, `scene.NodeType`, `scene.getName`, `scene.deleteNodes`, `cad.Body` objects — pxz uses **integer handles**, not objects. Real names: `scene.getOccurrenceName`, `scene.deleteOccurrences`, etc.
-- Keyword arguments on `io.exportScene` — the real signature is `exportScene(fileName: str, root: int = 0)`. Format is inferred from extension; per-format options are set via `core.setModuleProperty("io", ...)` before the export call.
+- Keyword arguments on `io.exportScene` — the real signature is `exportScene(fileName: str, root: int = 0)`. Format is inferred from extension; per-format options are set via `core.setModuleProperty("IO", ...)` (module name upper-case) before the export call.
 
 If something is uncertain or undocumented:
 
@@ -156,7 +188,7 @@ If something is uncertain or undocumented:
 - Suggest the closest supported approach from the reference.
 - If the SDK genuinely doesn't support what the user is asking for, say that and describe the closest workflow.
 
-**Version.** The reference is verified against the installed **2026.4.0.0** stubs — the exact surface `run_python` executes against. Prefer functions confirmed in `pxz-api-reference.md`; when in doubt, probe the live SDK (`print([n for n in dir(pxz.algo) if "decimate" in n.lower()])`) before relying on a call.
+**Version.** The reference is verified against the installed **2026.5.0.0** stubs — the exact surface `run_python` executes against. Prefer functions confirmed in `pxz-api-reference.md`; when in doubt, probe the live SDK (`print([n for n in dir(pxz.algo) if "decimate" in n.lower()])`) before relying on a call.
 
 Ground-truth source for the reference: the `*.pyi` type stubs shipped inside the installed `pxz` package. Re-extract the reference if the SDK is upgraded.
 

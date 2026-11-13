@@ -1,7 +1,7 @@
 {
   "name": "uat-mcp",
   "displayName": "Unity Asset Transformer",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Prepare and optimise CAD data locally with the Unity Asset Transformer (pxz) SDK — import, repair, tessellate, decimate, bake, render and export. Requires a Pixyz license seat.",
   "author": {
     "name": "Unity Technologies",

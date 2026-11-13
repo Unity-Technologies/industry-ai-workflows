@@ -18,6 +18,7 @@ from urllib3.util.retry import Retry
 
 from .local_paths import assert_safe_local_path
 from .signed_urls import open_transfer_session
+from .unity_auth import cloud_env as _cloud_env
 from .unity_auth import vpc as _vpc
 from .version import attribution_headers
 
@@ -27,9 +28,10 @@ from .version import attribution_headers
 
 # On a private-cloud (VPC) deployment the same endpoint paths are served from
 # the customer's host: https://{fqdn}{path_prefix}/assets/v1/... Public cloud
-# is unchanged when UNITY_VPC_FQDN is unset.
+# is unchanged when UNITY_VPC_FQDN is unset. Public-cloud hosts come from
+# unity_auth/cloud_env.py.
 _AM_BASE = _vpc.api_base(
-    "https://services.api.unity.com/assets/v1",
+    _cloud_env.url("services", "/assets/v1"),
     _vpc.assets_service_path().lstrip("/"),
 )
 
@@ -37,7 +39,7 @@ _AM_BASE = _vpc.api_base(
 # project archive/delete). Private cloud deployments manage projects through
 # their own identity and org services instead, so this stays pinned to the
 # public host and its callers refuse to run in VPC mode.
-_USER_BASE = "https://services.unity.com"
+_USER_BASE = _cloud_env.url("gateway")
 
 # ---------------------------------------------------------------------------
 # Timeouts and retries
@@ -881,6 +883,61 @@ def delete_assets_from_trash(session: requests.Session, org_id: str, project_id:
     """PERMANENTLY delete specific assets from the trash can. Irreversible."""
     url = _proj(project_id, "trash", "assets")
     resp = _delete(session, url, json={"assetIds": asset_ids})
+    _raise(resp)
+
+
+def check_dataset_in_asset(
+    session: requests.Session,
+    project_id: str,
+    asset_id: str,
+    asset_version: str,
+    dataset_id: str,
+) -> dict:
+    """Validate that a dataset belongs to an asset version AND that the asset
+    belongs to the project. 200 -> {"datasetVersionId", "isPreview"}.
+    verified live: a dataset outside the asset is a 400 (code 40983
+    "does not belong to asset"), not the 404 the spec suggests."""
+    resp = _get(session, _proj(
+        project_id, "assets", asset_id, "versions", asset_version, "datasets", dataset_id, "check",
+    ))
+    _raise(resp)
+    return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Project features
+# ---------------------------------------------------------------------------
+
+def list_features(
+    session: requests.Session, offset: int | None = None, limit: int | None = None,
+) -> dict:
+    """List the Asset Manager features that can be enabled on a project.
+    Not org-scoped. Response: {"results": [{"name", "description"}], "total"}."""
+    params: dict[str, Any] = {}
+    if offset is not None:
+        params["offset"] = offset
+    if limit is not None:
+        params["limit"] = limit
+    resp = _get(session, f"{_AM_BASE}/features", params=params or None)
+    _raise(resp)
+    return resp.json()
+
+
+def add_project_features(session: requests.Session, project_id: str, features: list[str]) -> None:
+    """Enable features (names from list_features) on a project. 204 on success.
+
+    verified live: MappedToUnityProject can only be enabled on an
+    EMPTY project — otherwise 400 code 40760 "... because it is not empty"
+    (the same code an unknown feature name gets). Removing a feature that is
+    not enabled is a no-op 204.
+    """
+    resp = _patch(session, _proj(project_id, "features"), json={"features": features})
+    _raise(resp)
+
+
+def remove_project_features(session: requests.Session, project_id: str, features: list[str]) -> None:
+    """Disable features on a project. DELETE with a JSON body. 204 on success."""
+    resp = _delete(session, _proj(project_id, "features"), json={"features": features})
     _raise(resp)
 
 
@@ -1779,7 +1836,7 @@ def create_project(session: requests.Session, org_id: str, name: str, metadata: 
 # buttons call (verified live); they are NOT part of the documented
 # public Assets API and may change without notice. All require the caller to be
 # an Owner or Manager of the organization.
-_UNITY_GATEWAY = "https://services.unity.com/api/unity"
+_UNITY_GATEWAY = _cloud_env.url("gateway", "/api/unity")
 
 
 def get_project_admin(session: requests.Session, project_id: str) -> dict:
@@ -1793,7 +1850,14 @@ def get_project_admin(session: requests.Session, project_id: str) -> dict:
 def archive_project(session: requests.Session, org_id: str, project_id: str) -> None:
     """Archive a project (dashboard 'Archive project'). org_id is the org UUID.
     Archiving is reversible from the dashboard's Archived tab and is required
-    before delete_project."""
+    before delete_project.
+
+    As of 2026-11-13 this returns 401 (code 120.004) for the plugin's token,
+    even for an org Owner: the dashboard now archives via
+    PUT .../legacy/v1/organizations/{genesisId}/projects/{id}/archive with a
+    dashboard-audience token, and that route refuses ours the same way. Reads
+    and delete_project still accept it, so callers fall back to asking the
+    user to archive in the dashboard."""
     resp = _put(
         session,
         f"{_UNITY_GATEWAY}/v1/organizations/{org_id}/projects/{project_id}/archive",

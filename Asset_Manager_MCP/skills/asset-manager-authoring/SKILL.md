@@ -121,11 +121,37 @@ upload.
 ## The Asset Transformer → Asset Manager handoff
 
 - **In-process (`at-scripting` / `run_python`):** the AT MCP writes a file to a
-  local path; then call `create_asset` + `upload_files_to_asset` (this skill) to
-  publish it. There is no direct "AT writes to AM" call — it's two steps.
+  local path; then publish it as described in
+  [Converted outputs](#converted-outputs-a-new-asset-not-a-new-dataset). There is
+  no direct "AT writes to AM" call.
 - **In a pipeline (`at-upa-scripting`):** the custom-script action has no AM
   credentials, so you chain the pipeline's **`Create asset` / `Add file`** actions
   instead (see `pipeline-authoring`). That's a different mechanism from this MCP.
+
+### Converted outputs: a new asset, not a new dataset
+
+A file converted from another asset (a GLB or FBX exported from a CAD source, an
+optimised LOD, a USD package) goes into **its own new asset**, linked back to
+the source by a **converted** reference. Do **not** add it as a custom dataset
+or an extra file on the source asset. A separate asset keeps its own versions,
+status, type and preview, can be searched and downloaded on its own, and the
+reference keeps the lineage visible in the dashboard.
+
+1. `create_asset` for the output, with its own name and type (for example
+   `"Pump_Housing (GLB)"`, `asset_type="3D Model"`), then
+   `upload_files_to_asset` with the converted file.
+2. `add_asset_reference(source_asset_name=<source>, target_asset_name=<converted>,
+   dependency_type="converted")`. The source points at its conversion. The
+   converted asset is frozen automatically, so finish uploading to it first.
+   The source must have an **unfrozen** version: if it is frozen, call
+   `create_new_draft_version` on it first and freeze it again afterwards.
+   `vocabulary="cad"` derives `converted` for you when the source is a CAD file
+   and the target an engine-format model.
+
+The MCP can only write the free-text `dependencyType`. The coarse reference
+`type` (`Converted` | `Dependency` | `Compound`) is set by the server, and the
+pipeline **`Create asset`** action sets it to `Converted` when you pass its
+`source*` fields (see `pipeline-authoring`).
 
 ## Best practices
 

@@ -29,6 +29,7 @@ from mcp.server.mcpserver import MCPServer
 from am_utils import am_init, am_rest, dependency_vocab
 from am_utils.client_identity import ClientIdentityExtension
 from am_utils.local_paths import assert_safe_local_path
+from am_utils.unity_auth import cloud_env as _cloud_env
 from am_utils.unity_auth import vpc as _vpc
 
 # The browser PKCE flow is deferred to the unity_login tool so the server can
@@ -1051,6 +1052,10 @@ def delete_project(project_id: str = "", project_name: str = "", org_id: str = "
     Unity Cloud dashboard's Archive/Delete buttons (not part of the documented
     public Assets API).
 
+    If the project is not archived yet and the archive step is refused (Unity
+    now reserves it for the dashboard's own sign-in), nothing is deleted and
+    the reply says how to archive it in the dashboard; call again afterwards.
+
     Args:
         project_id:   ID of the project to delete (preferred).
         project_name: Name of the project — resolved via list_projects when
@@ -1095,7 +1100,24 @@ def delete_project(project_id: str = "", project_name: str = "", org_id: str = "
             )
 
         if not info.get("archivedAt"):
-            am_rest.archive_project(session, info["organizationId"], project_id)
+            try:
+                am_rest.archive_project(session, info["organizationId"], project_id)
+            except RuntimeError as exc:
+                if "HTTP 401" not in str(exc):
+                    raise
+                # Since 2026-11 the archive endpoint accepts only the dashboard's
+                # own sign-in token; delete still accepts ours once archived.
+                projects_url = (
+                    f"{_cloud_env.url('dashboard')}/home/organizations/"
+                    f"{info.get('organizationGenesisId', '')}/projects"
+                )
+                return (
+                    f"Project '{label}' (id={project_id}) could not be archived: Unity's "
+                    "archive endpoint now accepts only the dashboard's own sign-in, not "
+                    "this plugin's. Nothing was deleted. Ask the user to archive it in the "
+                    f"dashboard ({projects_url}, project menu → Archive), then call "
+                    "delete_project again with confirm=True to delete it permanently."
+                )
         am_rest.delete_project(session, info["organizationGenesisId"], project_id)
         return f"Project '{label}' (id={project_id}) archived and permanently deleted."
     except Exception as e:
@@ -1670,6 +1692,117 @@ def restore_asset(
         return json.dumps({"restored_asset_ids": asset_ids, "message": "Assets restored from trash."}, indent=2)
     except Exception as e:
         return f"Error restoring assets: {e}"
+
+
+@mcp.tool()
+@_require_auth
+def check_dataset_in_asset(
+    asset_id: str,
+    asset_version: str,
+    dataset_id: str,
+    org_id: str = "",
+    project_id: str = "",
+    project_name: str = "",
+) -> str:
+    """Check that a dataset belongs to an asset version and report whether it is the preview dataset.
+
+    Returns {"datasetVersionId", "isPreview"}; errors (HTTP 400, code 40983) when
+    the dataset is not part of that asset version.
+
+    Args:
+        asset_id:      Asset ID.
+        asset_version: Asset version ID.
+        dataset_id:    Dataset ID to check.
+        org_id:        Organisation ID (falls back to the session default; see set_default_organization).
+        project_id:    Project ID (falls back to the session default; see set_default_project).
+    """
+    org = _org(org_id)
+    proj, resolve_error = _resolve_project_id(org, project_id=project_id, project_name=project_name)
+    if resolve_error:
+        return resolve_error
+    try:
+        session = am_init.get_session()
+        result = am_rest.check_dataset_in_asset(session, proj, asset_id, asset_version, dataset_id)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error checking dataset '{dataset_id}' in asset '{asset_id}': {e}"
+
+
+@mcp.tool()
+@_require_auth
+def list_features(offset: int = 0, limit: int = 0) -> str:
+    """List the Asset Manager features that can be enabled on a project (not org-scoped).
+
+    Use the returned names with add_project_features / remove_project_features.
+
+    Args:
+        offset: Optional pagination offset (0 = server default).
+        limit:  Optional page size (0 = server default).
+    """
+    try:
+        session = am_init.get_session()
+        result = am_rest.list_features(session, offset=offset or None, limit=limit or None)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Error listing features: {e}"
+
+
+@mcp.tool()
+@_require_auth
+def add_project_features(
+    features: list[str],
+    org_id: str = "",
+    project_id: str = "",
+    project_name: str = "",
+) -> str:
+    """Enable Asset Manager features on a project (names from list_features).
+
+    Some features can only be enabled on an empty project — MappedToUnityProject
+    is refused with HTTP 400 code 40760 "not empty" once the project holds any
+    asset, so enable it right after create_project.
+
+    Args:
+        features:    Feature names to enable.
+        org_id:      Organisation ID (falls back to the session default; see set_default_organization).
+        project_id:  Project ID (falls back to the session default; see set_default_project).
+    """
+    org = _org(org_id)
+    proj, resolve_error = _resolve_project_id(org, project_id=project_id, project_name=project_name)
+    if resolve_error:
+        return resolve_error
+    try:
+        session = am_init.get_session()
+        am_rest.add_project_features(session, proj, features)
+        return json.dumps({"project_id": proj, "enabled_features": features}, indent=2)
+    except Exception as e:
+        return f"Error enabling features on project '{proj}': {e}"
+
+
+@mcp.tool()
+@_require_auth
+def remove_project_features(
+    features: list[str],
+    org_id: str = "",
+    project_id: str = "",
+    project_name: str = "",
+) -> str:
+    """Disable Asset Manager features on a project.
+
+    Args:
+        features:    Feature names to disable.
+        org_id:      Organisation ID (falls back to the session default; see set_default_organization).
+        project_id:  Project ID (falls back to the session default; see set_default_project).
+    """
+    org = _org(org_id)
+    proj, resolve_error = _resolve_project_id(org, project_id=project_id, project_name=project_name)
+    if resolve_error:
+        return resolve_error
+    try:
+        session = am_init.get_session()
+        am_rest.remove_project_features(session, proj, features)
+        return json.dumps({"project_id": proj, "disabled_features": features}, indent=2)
+    except Exception as e:
+        return f"Error disabling features on project '{proj}': {e}"
 
 
 @mcp.tool()
@@ -2504,7 +2637,7 @@ def get_asset_url(
             return f"Asset '{asset_name}' not found."
 
         dashboard_url = (
-            f"https://cloud.unity.com/home/organizations/{org}"
+            f"{_cloud_env.url('dashboard')}/home/organizations/{org}"
             f"/projects/{proj}/assets?assetId={asset.id}:{asset.version}"
         )
 
@@ -2840,7 +2973,7 @@ def unity_auth_status() -> str:
     return json.dumps(
         {
             "ready": err is None,
-            "message": err or "Authenticated.",
+            "message": err or f"Authenticated to {am_init.pkce_auth.deployment_label()}.",
         },
         indent=2,
     )

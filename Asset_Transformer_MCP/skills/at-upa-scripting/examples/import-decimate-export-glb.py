@@ -83,7 +83,8 @@ def process_asset(
     print(f"Polygons after tessellation: {poly_before}")
 
     print(f"Decimating to {ratio * 100:.0f}% of triangles...")
-    algo.decimateTarget([root], ["ratio", float(ratio)])
+    # The SDK ratio is a PERCENTAGE (50.0 keeps half); --ratio is a 0-1 fraction.
+    algo.decimateTarget([root], ["ratio", float(ratio) * 100.0])
 
     poly_after = scene.getPolygonCount([root])
     if poly_before > 0:

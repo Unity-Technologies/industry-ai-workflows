@@ -81,10 +81,10 @@ AT_INDEX = "https://unity3ddist.jfrog.io/artifactory/api/pypi/pixyz-pypi-prod-lo
 # available for THIS platform. Keep in sync with the note in
 # Asset_Transformer_MCP/requirements.txt.
 PXZ_VERSION = {
-    "win32": "2026.4.0.0",
-    "linux": "2026.4.0.0",
-    "darwin": "2026.3.2.1",  # macOS wheels currently trail win/linux
-}.get(sys.platform, "2026.4.0.0")
+    "win32": "2026.5.0.0",
+    "linux": "2026.5.0.0",
+    "darwin": "2026.5.0.0",
+}.get(sys.platform, "2026.5.0.0")
 
 # Candidate data-directory ids, in preference order. Observed empirically
 # ($CLAUDE_PLUGIN_DATA in real hook/server runs): a GitHub- or local-
